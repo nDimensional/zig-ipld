@@ -1,0 +1,16 @@
+.{
+    .name = "ipld",
+    .version = "0.0.0",
+    .minimum_zig_version = "0.13.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+    .dependencies = .{
+        .multiformats = .{
+            .url = "https://github.com/nDimensional/zig-multiformats/archive/refs/tags/v0.1.0.tar.gz",
+            .hash = "1220541af4ae4e763aa59d4f3ed7af96b7b21720c4c2a390f72d286f9ddfe8bc548b",
+        },
+    },
+}
