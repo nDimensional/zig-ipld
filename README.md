@@ -34,7 +34,6 @@ Then in `build.zig`:
 
 ```zig
 pub fn build(b: *std.Build) !void {
-    // for using the ipld.Value type
     const ipld_dep = b.dependency("ipld", .{});
 
     const ipld = ipld_dep.module("ipld");
