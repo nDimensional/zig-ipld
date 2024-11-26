@@ -57,7 +57,7 @@ const Value = @import("ipld").Value;
 
 // the kinds [null, boolean, integer, float] have static values.
 // the kinds [string, bytes, list, map, link] are pointers to
-// allocated ref-counted
+// allocated ref-counted objects
 
 const false_val = Value.False;
 const true_val = Value.True;
