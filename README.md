@@ -8,8 +8,6 @@ Passes all tests in [ipld/codec-fixtures](https://github.com/ipld/codec-fixtures
 
 ## Table of Contents
 
-## Table of Contents
-
 - [Install](#install)
 - [Usage](#usage)
   - [Dynamic values](#dynamic-values)
