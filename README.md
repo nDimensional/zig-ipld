@@ -4,6 +4,8 @@ Zig implementation of the IPLD data model, with dag-cbor and dag-json codecs.
 
 Currently only implements a "dynamic" heap-allocated `Value` type. An additional statically-typed variant for streaming directly to/from Zig types is in development.
 
+Passes all tests in [ipld/codec-fixtures](https://github.com/ipld/codec-fixtures) except for `i64` integer overflow cases.
+
 ## Table of Contents
 
 ## Table of Contents
@@ -111,7 +113,7 @@ pub fn main() !void {
 
 ### Encoding dynamic values
 
-`dag-cbor` and `dag-json` both export interface-compativle `Encoder` and `Decoder` structs. See [example.zig](./example.zig) for usage.
+`dag-cbor` and `dag-json` both export interface-compatible `Encoder` and `Decoder` structs. See [example.zig](./example.zig) for usage.
 
 ### Static Types
 
