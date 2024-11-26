@@ -296,10 +296,9 @@ pub const Encoder = struct {
                 // TODO: detect cycles
                 map.sort();
                 try self.writeArgumentInt(.Map, map.len(), writer);
-                for (map.keys()) |key| {
-                    const v = map.get(key) orelse continue;
-                    try self.writeArgumentInt(.TextString, key.len, writer);
-                    try writer.writeAll(key);
+                for (map.keys(), map.values()) |k, v| {
+                    try self.writeArgumentInt(.TextString, k.len, writer);
+                    try writer.writeAll(k);
                     try self.writeValue(v, writer);
                 }
             },
@@ -370,10 +369,9 @@ pub const Encoder = struct {
             },
             .map => |map| {
                 var sum: usize = argumentEncodingLength(map.len());
-                for (map.keys()) |key| {
-                    const v = map.get(key) orelse continue;
-                    sum += argumentEncodingLength(key.len);
-                    sum += key.len;
+                for (map.keys(), map.values()) |k, v| {
+                    sum += argumentEncodingLength(k.len);
+                    sum += k.len;
                     sum += encodingLengthValue(v);
                 }
                 return sum;

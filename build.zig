@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
 
     // const varint = multiformats.module("varint");
     const multicodec = multiformats.module("multicodec");
-    // const multibase = multiformats.module("multibase");
+    const multibase = multiformats.module("multibase");
     // const multihash = multiformats.module("multihash");
     const cid = multiformats.module("cid");
 
@@ -16,6 +16,7 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/lib.zig"),
         .imports = &.{
             .{ .name = "multicodec", .module = multicodec },
+            .{ .name = "multibase", .module = multibase },
             .{ .name = "cid", .module = cid },
         },
     });
@@ -36,7 +37,16 @@ pub fn build(b: *std.Build) void {
     const run_dag_cbor_tests = b.addRunArtifact(dag_cbor_tests);
     b.step("test-dag-cbor", "Run dag-cbor tests").dependOn(&run_dag_cbor_tests.step);
 
+    const dag_json_tests = b.addTest(.{ .root_source_file = b.path("src/dag_json_test.zig") });
+    dag_json_tests.root_module.addImport("multicodec", multicodec);
+    dag_json_tests.root_module.addImport("multibase", multibase);
+    dag_json_tests.root_module.addImport("cid", cid);
+    dag_json_tests.root_module.addImport("ipld", ipld);
+    const run_dag_json_tests = b.addRunArtifact(dag_json_tests);
+    b.step("test-dag-json", "Run dag-json tests").dependOn(&run_dag_json_tests.step);
+
     const tests = b.step("test", "Run unit tests");
     tests.dependOn(&run_ipld_tests.step);
     tests.dependOn(&run_dag_cbor_tests.step);
+    tests.dependOn(&run_dag_json_tests.step);
 }

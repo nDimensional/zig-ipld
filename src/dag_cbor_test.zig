@@ -25,21 +25,6 @@ test "fixture values" {
         pub inline fn init(value: Value, bytes: []const u8) @This() {
             return .{ .value = value, .bytes = bytes };
         }
-
-        pub fn testDecoder(self: @This(), allocator: std.mem.Allocator, decoder: *Decoder) !void {
-            const actual = try decoder.decodeValue(allocator, self.bytes);
-            const expected: *const self.T = @alignCast(@ptrCast(self.value));
-            try std.testing.expectEqual(expected.*, actual);
-        }
-
-        pub fn testEncoder(self: @This(), allocator: std.mem.Allocator, encoder: *Encoder) !void {
-            var arena = std.heap.ArenaAllocator.init(allocator);
-            defer arena.deinit();
-
-            const value: *const self.T = @alignCast(@ptrCast(self.value));
-            const actual = try encoder.encode(self.T, arena.allocator(), value.*);
-            try std.testing.expectEqualSlices(u8, self.bytes, actual);
-        }
     };
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};

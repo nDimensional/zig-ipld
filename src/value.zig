@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const multibase = @import("multibase");
 const CID = @import("cid").CID;
 
 pub const List = struct {
@@ -32,15 +33,14 @@ pub const List = struct {
         return list;
     }
 
+    /// increment reference count
     pub inline fn ref(self: *List) void {
         self.refs += 1;
     }
 
+    /// decrement reference count, freeing all data on self.refs == 0
     pub fn unref(self: *List) void {
-        if (self.refs == 0) {
-            std.log.err("ref count already at zero ({any})", .{self});
-            return;
-        }
+        if (self.refs == 0) @panic("ref count already at zero");
 
         self.refs -= 1;
         if (self.refs == 0) {
@@ -155,15 +155,14 @@ pub const Map = struct {
         return map;
     }
 
+    /// increment reference count
     pub inline fn ref(self: *Map) void {
         self.refs += 1;
     }
 
+    /// decrement reference count, freeing all data on self.refs == 0
     pub fn unref(self: *Map) void {
-        if (self.refs == 0) {
-            std.log.err("ref count already at zero ({any})", .{self});
-            return;
-        }
+        if (self.refs == 0) @panic("ref count already at zero");
 
         self.refs -= 1;
         if (self.refs == 0) {
@@ -193,16 +192,18 @@ pub const Map = struct {
         return self.hash_map.entries.len;
     }
 
-    pub inline fn set(self: *Map, key: []const u8, value: Value) !void {
+    pub fn set(self: *Map, key: []const u8, value: Value) !void {
         const key_copy = try self.allocator.alloc(u8, key.len);
         @memcpy(key_copy, key);
         errdefer self.allocator.free(key_copy);
+
+        // TODO: check/free existing entry
 
         try self.hash_map.put(self.allocator, key_copy, value);
         value.ref();
     }
 
-    pub inline fn delete(self: *Map, key: []const u8) !void {
+    pub fn delete(self: *Map, key: []const u8) !void {
         if (self.hash_map.fetchSwapRemove(key)) |entry| {
             self.allocator.free(entry.key);
             entry.value.unref();
@@ -231,6 +232,7 @@ pub const String = struct {
     refs: u32,
     data: []const u8,
 
+    /// copies `data` using `allocator`
     pub fn create(allocator: std.mem.Allocator, data: []const u8) !*String {
         const data_copy = try allocator.alloc(u8, data.len);
         @memcpy(data_copy, data);
@@ -243,15 +245,14 @@ pub const String = struct {
         return string;
     }
 
+    /// increment reference count
     pub inline fn ref(self: *String) void {
         self.refs += 1;
     }
 
+    /// decrement reference count, freeing all data on self.refs == 0
     pub fn unref(self: *String) void {
-        if (self.refs == 0) {
-            std.log.err("ref count already at zero ({any})", .{self});
-            return;
-        }
+        if (self.refs == 0) @panic("ref count already at zero");
 
         self.refs -= 1;
         if (self.refs == 0) {
@@ -274,6 +275,7 @@ pub const Bytes = struct {
     refs: u32,
     data: []const u8,
 
+    /// copies `data` using `allocator`
     pub fn create(allocator: std.mem.Allocator, data: []const u8) !*Bytes {
         const data_copy = try allocator.alloc(u8, data.len);
         @memcpy(data_copy, data);
@@ -286,15 +288,26 @@ pub const Bytes = struct {
         return bytes;
     }
 
+    /// decodes base-prefixed `str` using `base` and `allocator`
+    pub fn baseDecode(allocator: std.mem.Allocator, str: []const u8, base: multibase.Base) !*Bytes {
+        const data_copy = try base.baseDecode(allocator, str);
+        errdefer allocator.free(data_copy);
+
+        const bytes = try allocator.create(Bytes);
+        bytes.allocator = allocator;
+        bytes.refs = 1;
+        bytes.data = data_copy;
+        return bytes;
+    }
+
+    /// increment reference count
     pub inline fn ref(self: *Bytes) void {
         self.refs += 1;
     }
 
+    /// decrement reference count, freeing all data on self.refs == 0
     pub fn unref(self: *Bytes) void {
-        if (self.refs == 0) {
-            std.log.err("ref count already at zero ({any})", .{self});
-            return;
-        }
+        if (self.refs == 0) @panic("ref count already at zero");
 
         self.refs -= 1;
         if (self.refs == 0) {
@@ -317,6 +330,7 @@ pub const Link = struct {
     refs: u32,
     cid: CID,
 
+    /// copies `cid` using `allocator`
     pub fn create(allocator: std.mem.Allocator, cid: CID) !*Link {
         const cid_copy = try cid.copy(allocator);
         errdefer cid_copy.deinit(allocator);
@@ -328,6 +342,19 @@ pub const Link = struct {
         return link;
     }
 
+    /// parse a new CID from `str` using `allocator`
+    pub fn parse(allocator: std.mem.Allocator, str: []const u8) !*Link {
+        const cid = try CID.parse(allocator, str);
+        errdefer cid.deinit(allocator);
+
+        const link = try allocator.create(Link);
+        link.allocator = allocator;
+        link.refs = 1;
+        link.cid = cid;
+        return link;
+    }
+
+    /// decode a new CID from `bytes` using `allocator`
     pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) !*Link {
         const cid = try CID.decode(allocator, bytes);
         errdefer cid.deinit(allocator);
@@ -339,15 +366,14 @@ pub const Link = struct {
         return link;
     }
 
+    /// increment reference count
     pub inline fn ref(self: *Link) void {
         self.refs += 1;
     }
 
+    /// decrement reference count, freeing all data on self.refs == 0
     pub fn unref(self: *Link) void {
-        if (self.refs == 0) {
-            std.log.err("ref count already at zero ({any})", .{self});
-            return;
-        }
+        if (self.refs == 0) @panic("ref count already at zero");
 
         self.refs -= 1;
         if (self.refs == 0) {
@@ -400,12 +426,19 @@ pub const Value = union(Kind) {
         return .{ .float = value };
     }
 
+    /// copies `data` using `allocator`
     pub inline fn createString(allocator: std.mem.Allocator, data: []const u8) !Value {
         return .{ .string = try String.create(allocator, data) };
     }
 
+    /// copies `data` using `allocator`
     pub inline fn createBytes(allocator: std.mem.Allocator, data: []const u8) !Value {
         return .{ .bytes = try Bytes.create(allocator, data) };
+    }
+
+    /// decodes base-prefixed `str` using `base` and `allocator`
+    pub inline fn baseDecodeBytes(allocator: std.mem.Allocator, str: []const u8) !Value {
+        return .{ .bytes = try Bytes.baseDecode(allocator, str) };
     }
 
     pub inline fn createList(allocator: std.mem.Allocator, initial_values: anytype) !Value {
@@ -416,8 +449,19 @@ pub const Value = union(Kind) {
         return .{ .map = try Map.create(allocator, initial_entries) };
     }
 
-    pub fn createLink(allocator: std.mem.Allocator, cid: CID) !Value {
+    /// copies `cid` using `allocator`
+    pub inline fn createLink(allocator: std.mem.Allocator, cid: CID) !Value {
         return .{ .link = try Link.create(allocator, cid) };
+    }
+
+    /// parse a new CID from `str` using `allocator`
+    pub inline fn parseLink(allocator: std.mem.Allocator, str: []const u8) !Value {
+        return .{ .link = try Link.parse(allocator, str) };
+    }
+
+    /// decode a new CID from `bytes` using `allocator`
+    pub inline fn decodeLink(allocator: std.mem.Allocator, bytes: []const u8) !Value {
+        return .{ .link = try Link.decode(allocator, bytes) };
     }
 
     pub fn ref(self: Value) void {
@@ -507,7 +551,10 @@ pub const Value = union(Kind) {
                 .list => |list_other| try list_self.expectEqual(list_other),
                 else => return error.DifferentKind,
             },
-            .map => |map| map.unref(),
+            .map => |map_self| switch (expected) {
+                .map => |map_other| try map_self.expectEqual(map_other),
+                else => return error.DifferentKind,
+            },
             .link => |link_self| switch (expected) {
                 .link => |link_other| try link_self.expectEqual(link_other),
                 else => return error.DifferentKind,
