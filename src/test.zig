@@ -1,9 +1,11 @@
 const std = @import("std");
-const json = @import("dag_json.zig");
-const cbor = @import("dag_cbor.zig");
+
 const CID = @import("cid").CID;
 const multicodec = @import("multicodec");
-const Value = @import("value.zig").Value;
+
+const Value = @import("ipld").Value;
+const json = @import("dag-json");
+const cbor = @import("dag-cbor");
 
 const Fixture = struct {
     allocator: std.mem.Allocator,
@@ -96,7 +98,7 @@ test "ipld/codec-fixtures" {
         const json_value = try json_decoder.readValue(allocator, json_fixture.file.reader().any());
         defer json_value.unref();
 
-        try Value.expectEqual(cbor_value, json_value);
+        try cbor_value.expectEqual(json_value);
     }
 }
 

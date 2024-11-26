@@ -2,11 +2,12 @@ const std = @import("std");
 
 const CID = @import("cid").CID;
 
-const Value = @import("value.zig").Value;
-const Kind = @import("value.zig").Kind;
-const List = @import("value.zig").List;
-const Map = @import("value.zig").Map;
-const Link = @import("value.zig").Link;
+const Value = @import("ipld").Value;
+const List = Value.List;
+const Map = Value.Map;
+const Link = Value.Link;
+const String = Value.String;
+const Bytes = Value.Bytes;
 
 // https://www.rfc-editor.org/rfc/rfc8949.html#section-3.1
 // Major Type | Meaning               | Content                         |

@@ -1,11 +1,15 @@
 const std = @import("std");
 
-const Kind = @import("value.zig").Kind;
-const Value = @import("value.zig").Value;
+const Value = @import("ipld").Value;
 
-const Header = @import("dag_cbor.zig").Header;
-const Decoder = @import("dag_cbor.zig").Decoder;
-const Encoder = @import("dag_cbor.zig").Encoder;
+const cbor = @import("dag-cbor");
+const Header = cbor.Header;
+const Decoder = cbor.Decoder;
+const Encoder = cbor.Encoder;
+
+// const Header = @import("dag_cbor.zig").Header;
+// const Decoder = @import("dag_cbor.zig").Decoder;
+// const Encoder = @import("dag_cbor.zig").Encoder;
 
 test "header" {
     try std.testing.expectEqual(@as(u8, (7 << 5) | 20), Header.fromSimpleValue(.False).encode());

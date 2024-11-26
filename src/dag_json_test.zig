@@ -1,11 +1,11 @@
 const std = @import("std");
 
-const Kind = @import("value.zig").Kind;
-const Value = @import("value.zig").Value;
+const Value = @import("ipld").Value;
 
-const Header = @import("dag_json.zig").Header;
-const Decoder = @import("dag_json.zig").Decoder;
-const Encoder = @import("dag_json.zig").Encoder;
+const json = @import("dag-json");
+const Header = json.Header;
+const Decoder = json.Decoder;
+const Encoder = json.Encoder;
 
 test "fixture values" {
     const Fixture = struct {

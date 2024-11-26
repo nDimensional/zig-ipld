@@ -3,414 +3,7 @@ const std = @import("std");
 const multibase = @import("multibase");
 const CID = @import("cid").CID;
 
-pub const List = struct {
-    allocator: std.mem.Allocator,
-    refs: u32,
-    array_list: std.ArrayListUnmanaged(Value),
-
-    pub fn create(allocator: std.mem.Allocator, initial_values: anytype) !*List {
-        var array_list = std.ArrayListUnmanaged(Value){};
-        errdefer array_list.deinit(allocator);
-
-        const tuple_info = switch (@typeInfo(@TypeOf(initial_values))) {
-            .Struct => |info| info,
-            else => @compileError("initial_values must be a tuple"),
-        };
-
-        if (!tuple_info.is_tuple) @compileError("initial_values must be a tuple");
-
-        try array_list.ensureTotalCapacity(allocator, tuple_info.fields.len);
-        inline for (tuple_info.fields) |field| {
-            if (field.type != Value) @compileError("map fields must be Value types");
-            const value = @field(initial_values, field.name);
-            array_list.appendAssumeCapacity(value);
-        }
-
-        const list = try allocator.create(List);
-        list.allocator = allocator;
-        list.refs = 1;
-        list.array_list = array_list;
-        return list;
-    }
-
-    /// increment reference count
-    pub inline fn ref(self: *List) void {
-        self.refs += 1;
-    }
-
-    /// decrement reference count, freeing all data on self.refs == 0
-    pub fn unref(self: *List) void {
-        if (self.refs == 0) @panic("ref count already at zero");
-
-        self.refs -= 1;
-        if (self.refs == 0) {
-            for (self.array_list.items) |*item| item.unref();
-            self.array_list.deinit(self.allocator);
-            self.allocator.destroy(self);
-        }
-    }
-
-    pub fn eql(self: *const List, other: *const List) bool {
-        const values_self = self.values();
-        const values_other = other.values();
-        if (values_self.len != values_other.len) return false;
-        for (0..values_self.len) |i|
-            if (!values_self[i].eql(values_other[i])) return false;
-
-        return true;
-    }
-
-    pub fn expectEqual(actual: *const List, expected: *const List) error{TestExpectedEqual}!void {
-        try std.testing.expectEqual(actual.len(), expected.len());
-        for (actual.array_list.items, expected.array_list.items) |actual_item, expected_item| {
-            try actual_item.expectEqual(expected_item);
-        }
-    }
-
-    pub inline fn len(self: *const List) usize {
-        return self.array_list.items.len;
-    }
-
-    pub inline fn get(self: *const List, index: usize) Value {
-        return self.array_list.items[index];
-    }
-
-    pub inline fn values(self: *const List) []const Value {
-        return self.array_list.items;
-    }
-
-    pub inline fn append(self: *List, value: Value) !void {
-        try self.array_list.append(self.allocator, value);
-        value.ref();
-    }
-
-    pub inline fn pop(self: *List) !Value {
-        return try self.array_list.pop();
-    }
-
-    pub inline fn insert(self: *List, index: usize, value: Value) !void {
-        try self.array_list.insert(self.allocator, index, value);
-        value.ref();
-    }
-
-    pub inline fn remove(self: *List, index: usize) void {
-        self.array_list.orderedRemove(index).unref();
-    }
-};
-
-pub const Map = struct {
-    const SortContext = struct {
-        keys: []const []const u8,
-
-        pub fn lessThan(ctx: SortContext, a_index: usize, b_index: usize) bool {
-            const a = ctx.keys[a_index];
-            const b = ctx.keys[b_index];
-
-            // First compare lengths
-            if (a.len != b.len) {
-                return a.len < b.len;
-            }
-
-            // If lengths are equal, compare lexicographically
-            var i: usize = 0;
-            while (i < a.len) : (i += 1) {
-                if (a[i] != b[i]) {
-                    return a[i] < b[i];
-                }
-            }
-
-            return false;
-        }
-    };
-
-    const HashMap = std.StringArrayHashMapUnmanaged(Value);
-
-    allocator: std.mem.Allocator,
-    refs: u32,
-    hash_map: HashMap,
-
-    pub fn create(allocator: std.mem.Allocator, initial_entries: anytype) !*Map {
-        var hash_map = HashMap{};
-        errdefer hash_map.deinit(allocator);
-
-        const struct_info = switch (@typeInfo(@TypeOf(initial_entries))) {
-            .Struct => |info| info,
-            else => @compileError("initial_entries must be a struct"),
-        };
-
-        if (struct_info.is_tuple and struct_info.fields.len > 0)
-            @compileError("initial_entries must be a struct");
-
-        try hash_map.ensureTotalCapacity(allocator, struct_info.fields.len);
-        inline for (struct_info.fields) |field| {
-            if (field.type != Value) @compileError("map fields must be Value types");
-            const value = @field(initial_entries, field.name);
-
-            const key = try allocator.alloc(u8, field.name.len);
-            @memcpy(key, field.name);
-            hash_map.putAssumeCapacity(key, value);
-        }
-
-        const map = try allocator.create(Map);
-        map.allocator = allocator;
-        map.refs = 1;
-        map.hash_map = hash_map;
-        return map;
-    }
-
-    /// increment reference count
-    pub inline fn ref(self: *Map) void {
-        self.refs += 1;
-    }
-
-    /// decrement reference count, freeing all data on self.refs == 0
-    pub fn unref(self: *Map) void {
-        if (self.refs == 0) @panic("ref count already at zero");
-
-        self.refs -= 1;
-        if (self.refs == 0) {
-            for (self.hash_map.keys()) |key| self.allocator.free(key);
-            for (self.hash_map.values()) |value| value.unref();
-            self.hash_map.deinit(self.allocator);
-            self.allocator.destroy(self);
-        }
-    }
-
-    pub fn eql(self: *const Map, other: *const Map) bool {
-        if (self.len() != other.len()) return false;
-        for (self.keys()) |key| {
-            const value_other = other.get(key) orelse return false;
-            if (self.get(key)) |value_self|
-                if (!value_self.eql(value_other)) return false;
-        }
-
-        return true;
-    }
-
-    pub fn expectEqual(expected: *const Map, actual: *const Map) error{TestExpectedEqual}!void {
-        for (expected.keys(), expected.values()) |expected_key, expected_value| {
-            if (actual.get(expected_key)) |actual_value| {
-                try expected_value.expectEqual(actual_value);
-            } else {
-                std.log.err("missing expected key {s}", .{expected_key});
-                return error.TestExpectedEqual;
-            }
-        }
-
-        for (actual.keys(), actual.values()) |actual_key, actual_value| {
-            if (expected.get(actual_key)) |expected_value| {
-                try actual_value.expectEqual(expected_value);
-            } else {
-                std.log.err("extraneous entry {s}", .{actual_key});
-                return error.TestExpectedEqual;
-            }
-        }
-    }
-
-    pub inline fn len(self: *const Map) usize {
-        return self.hash_map.entries.len;
-    }
-
-    pub fn set(self: *Map, key: []const u8, value: Value) !void {
-        const key_copy = try self.allocator.alloc(u8, key.len);
-        @memcpy(key_copy, key);
-        errdefer self.allocator.free(key_copy);
-
-        // TODO: check/free existing entry
-
-        try self.hash_map.put(self.allocator, key_copy, value);
-        value.ref();
-    }
-
-    pub fn delete(self: *Map, key: []const u8) !void {
-        if (self.hash_map.fetchSwapRemove(key)) |entry| {
-            self.allocator.free(entry.key);
-            entry.value.unref();
-        }
-    }
-
-    pub inline fn get(self: *const Map, key: []const u8) ?Value {
-        return self.hash_map.get(key);
-    }
-
-    pub inline fn keys(self: *const Map) []const []const u8 {
-        return self.hash_map.keys();
-    }
-
-    pub inline fn values(self: *const Map) []const Value {
-        return self.hash_map.values();
-    }
-
-    pub inline fn sort(self: *Map) void {
-        self.hash_map.sortUnstable(SortContext{ .keys = self.hash_map.keys() });
-    }
-};
-
-pub const String = struct {
-    allocator: std.mem.Allocator,
-    refs: u32,
-    data: []const u8,
-
-    /// copies `data` using `allocator`
-    pub fn create(allocator: std.mem.Allocator, data: []const u8) !*String {
-        const data_copy = try allocator.alloc(u8, data.len);
-        @memcpy(data_copy, data);
-        errdefer allocator.free(data_copy);
-
-        const string = try allocator.create(String);
-        string.allocator = allocator;
-        string.refs = 1;
-        string.data = data_copy;
-        return string;
-    }
-
-    /// increment reference count
-    pub inline fn ref(self: *String) void {
-        self.refs += 1;
-    }
-
-    /// decrement reference count, freeing all data on self.refs == 0
-    pub fn unref(self: *String) void {
-        if (self.refs == 0) @panic("ref count already at zero");
-
-        self.refs -= 1;
-        if (self.refs == 0) {
-            self.allocator.free(self.data);
-            self.allocator.destroy(self);
-        }
-    }
-
-    pub inline fn eql(self: *const String, other: *const String) bool {
-        return std.mem.eql(u8, self.data, other.data);
-    }
-
-    pub inline fn expectEqual(actual: *const String, expected: *const String) error{TestExpectedEqual}!void {
-        try std.testing.expectEqualSlices(u8, actual.data, expected.data);
-    }
-};
-
-pub const Bytes = struct {
-    allocator: std.mem.Allocator,
-    refs: u32,
-    data: []const u8,
-
-    /// copies `data` using `allocator`
-    pub fn create(allocator: std.mem.Allocator, data: []const u8) !*Bytes {
-        const data_copy = try allocator.alloc(u8, data.len);
-        @memcpy(data_copy, data);
-        errdefer allocator.free(data_copy);
-
-        const bytes = try allocator.create(Bytes);
-        bytes.allocator = allocator;
-        bytes.refs = 1;
-        bytes.data = data_copy;
-        return bytes;
-    }
-
-    /// decodes base-prefixed `str` using `base` and `allocator`
-    pub fn baseDecode(allocator: std.mem.Allocator, str: []const u8, base: multibase.Base) !*Bytes {
-        const data_copy = try base.baseDecode(allocator, str);
-        errdefer allocator.free(data_copy);
-
-        const bytes = try allocator.create(Bytes);
-        bytes.allocator = allocator;
-        bytes.refs = 1;
-        bytes.data = data_copy;
-        return bytes;
-    }
-
-    /// increment reference count
-    pub inline fn ref(self: *Bytes) void {
-        self.refs += 1;
-    }
-
-    /// decrement reference count, freeing all data on self.refs == 0
-    pub fn unref(self: *Bytes) void {
-        if (self.refs == 0) @panic("ref count already at zero");
-
-        self.refs -= 1;
-        if (self.refs == 0) {
-            self.allocator.free(self.data);
-            self.allocator.destroy(self);
-        }
-    }
-
-    pub inline fn eql(self: *const Bytes, other: *const Bytes) bool {
-        return std.mem.eql(u8, self.data, other.data);
-    }
-
-    pub inline fn expectEqual(actual: *const Bytes, expected: *const Bytes) error{TestExpectedEqual}!void {
-        try std.testing.expectEqualSlices(u8, actual.data, expected.data);
-    }
-};
-
-pub const Link = struct {
-    allocator: std.mem.Allocator,
-    refs: u32,
-    cid: CID,
-
-    /// copies `cid` using `allocator`
-    pub fn create(allocator: std.mem.Allocator, cid: CID) !*Link {
-        const cid_copy = try cid.copy(allocator);
-        errdefer cid_copy.deinit(allocator);
-
-        const link = try allocator.create(Link);
-        link.allocator = allocator;
-        link.refs = 1;
-        link.cid = cid_copy;
-        return link;
-    }
-
-    /// parse a new CID from `str` using `allocator`
-    pub fn parse(allocator: std.mem.Allocator, str: []const u8) !*Link {
-        const cid = try CID.parse(allocator, str);
-        errdefer cid.deinit(allocator);
-
-        const link = try allocator.create(Link);
-        link.allocator = allocator;
-        link.refs = 1;
-        link.cid = cid;
-        return link;
-    }
-
-    /// decode a new CID from `bytes` using `allocator`
-    pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) !*Link {
-        const cid = try CID.decode(allocator, bytes);
-        errdefer cid.deinit(allocator);
-
-        const link = try allocator.create(Link);
-        link.allocator = allocator;
-        link.refs = 1;
-        link.cid = cid;
-        return link;
-    }
-
-    /// increment reference count
-    pub inline fn ref(self: *Link) void {
-        self.refs += 1;
-    }
-
-    /// decrement reference count, freeing all data on self.refs == 0
-    pub fn unref(self: *Link) void {
-        if (self.refs == 0) @panic("ref count already at zero");
-
-        self.refs -= 1;
-        if (self.refs == 0) {
-            self.cid.deinit(self.allocator);
-            self.allocator.destroy(self);
-        }
-    }
-
-    pub inline fn eql(self: *const Link, other: *const Link) bool {
-        return self.cid.eql(other.cid);
-    }
-
-    pub inline fn expectEqual(actual: *const Link, expected: *const Link) error{TestExpectedEqual}!void {
-        try actual.cid.expectEqual(expected.cid);
-    }
-};
-
-pub const Kind = enum {
+const ValueKind = enum {
     null,
     boolean,
     integer,
@@ -422,7 +15,415 @@ pub const Kind = enum {
     link,
 };
 
-pub const Value = union(Kind) {
+pub const Value = union(ValueKind) {
+    pub const Kind = ValueKind;
+
+    pub const List = struct {
+        allocator: std.mem.Allocator,
+        refs: u32,
+        array_list: std.ArrayListUnmanaged(Value),
+
+        pub fn create(allocator: std.mem.Allocator, initial_values: anytype) !*List {
+            var array_list = std.ArrayListUnmanaged(Value){};
+            errdefer array_list.deinit(allocator);
+
+            const tuple_info = switch (@typeInfo(@TypeOf(initial_values))) {
+                .Struct => |info| info,
+                else => @compileError("initial_values must be a tuple"),
+            };
+
+            if (!tuple_info.is_tuple) @compileError("initial_values must be a tuple");
+
+            try array_list.ensureTotalCapacity(allocator, tuple_info.fields.len);
+            inline for (tuple_info.fields) |field| {
+                if (field.type != Value) @compileError("map fields must be Value types");
+                const value = @field(initial_values, field.name);
+                array_list.appendAssumeCapacity(value);
+            }
+
+            const list = try allocator.create(List);
+            list.allocator = allocator;
+            list.refs = 1;
+            list.array_list = array_list;
+            return list;
+        }
+
+        /// increment reference count
+        pub inline fn ref(self: *List) void {
+            self.refs += 1;
+        }
+
+        /// decrement reference count, freeing all data on self.refs == 0
+        pub fn unref(self: *List) void {
+            if (self.refs == 0) @panic("ref count already at zero");
+
+            self.refs -= 1;
+            if (self.refs == 0) {
+                for (self.array_list.items) |*item| item.unref();
+                self.array_list.deinit(self.allocator);
+                self.allocator.destroy(self);
+            }
+        }
+
+        pub fn eql(self: *const List, other: *const List) bool {
+            const values_self = self.values();
+            const values_other = other.values();
+            if (values_self.len != values_other.len) return false;
+            for (0..values_self.len) |i|
+                if (!values_self[i].eql(values_other[i])) return false;
+
+            return true;
+        }
+
+        pub fn expectEqual(actual: *const List, expected: *const List) error{TestExpectedEqual}!void {
+            try std.testing.expectEqual(actual.len(), expected.len());
+            for (actual.array_list.items, expected.array_list.items) |actual_item, expected_item| {
+                try actual_item.expectEqual(expected_item);
+            }
+        }
+
+        pub inline fn len(self: *const List) usize {
+            return self.array_list.items.len;
+        }
+
+        pub inline fn get(self: *const List, index: usize) Value {
+            return self.array_list.items[index];
+        }
+
+        pub inline fn values(self: *const List) []const Value {
+            return self.array_list.items;
+        }
+
+        pub inline fn append(self: *List, value: Value) !void {
+            try self.array_list.append(self.allocator, value);
+            value.ref();
+        }
+
+        pub inline fn pop(self: *List) !Value {
+            return try self.array_list.pop();
+        }
+
+        pub inline fn insert(self: *List, index: usize, value: Value) !void {
+            try self.array_list.insert(self.allocator, index, value);
+            value.ref();
+        }
+
+        pub inline fn remove(self: *List, index: usize) void {
+            self.array_list.orderedRemove(index).unref();
+        }
+    };
+
+    pub const Map = struct {
+        const SortContext = struct {
+            keys: []const []const u8,
+
+            pub fn lessThan(ctx: SortContext, a_index: usize, b_index: usize) bool {
+                const a = ctx.keys[a_index];
+                const b = ctx.keys[b_index];
+
+                // First compare lengths
+                if (a.len != b.len) {
+                    return a.len < b.len;
+                }
+
+                // If lengths are equal, compare lexicographically
+                var i: usize = 0;
+                while (i < a.len) : (i += 1) {
+                    if (a[i] != b[i]) {
+                        return a[i] < b[i];
+                    }
+                }
+
+                return false;
+            }
+        };
+
+        const HashMap = std.StringArrayHashMapUnmanaged(Value);
+
+        allocator: std.mem.Allocator,
+        refs: u32,
+        hash_map: HashMap,
+
+        pub fn create(allocator: std.mem.Allocator, initial_entries: anytype) !*Map {
+            var hash_map = HashMap{};
+            errdefer hash_map.deinit(allocator);
+
+            const struct_info = switch (@typeInfo(@TypeOf(initial_entries))) {
+                .Struct => |info| info,
+                else => @compileError("initial_entries must be a struct"),
+            };
+
+            if (struct_info.is_tuple and struct_info.fields.len > 0)
+                @compileError("initial_entries must be a struct");
+
+            try hash_map.ensureTotalCapacity(allocator, struct_info.fields.len);
+            inline for (struct_info.fields) |field| {
+                if (field.type != Value) @compileError("map fields must be Value types");
+                const value = @field(initial_entries, field.name);
+
+                const key = try allocator.alloc(u8, field.name.len);
+                @memcpy(key, field.name);
+                hash_map.putAssumeCapacity(key, value);
+            }
+
+            const map = try allocator.create(Map);
+            map.allocator = allocator;
+            map.refs = 1;
+            map.hash_map = hash_map;
+            return map;
+        }
+
+        /// increment reference count
+        pub inline fn ref(self: *Map) void {
+            self.refs += 1;
+        }
+
+        /// decrement reference count, freeing all data on self.refs == 0
+        pub fn unref(self: *Map) void {
+            if (self.refs == 0) @panic("ref count already at zero");
+
+            self.refs -= 1;
+            if (self.refs == 0) {
+                for (self.hash_map.keys()) |key| self.allocator.free(key);
+                for (self.hash_map.values()) |value| value.unref();
+                self.hash_map.deinit(self.allocator);
+                self.allocator.destroy(self);
+            }
+        }
+
+        pub fn eql(self: *const Map, other: *const Map) bool {
+            if (self.len() != other.len()) return false;
+            for (self.keys()) |key| {
+                const value_other = other.get(key) orelse return false;
+                if (self.get(key)) |value_self|
+                    if (!value_self.eql(value_other)) return false;
+            }
+
+            return true;
+        }
+
+        pub fn expectEqual(expected: *const Map, actual: *const Map) error{TestExpectedEqual}!void {
+            for (expected.keys(), expected.values()) |expected_key, expected_value| {
+                if (actual.get(expected_key)) |actual_value| {
+                    try expected_value.expectEqual(actual_value);
+                } else {
+                    std.log.err("missing expected key {s}", .{expected_key});
+                    return error.TestExpectedEqual;
+                }
+            }
+
+            for (actual.keys()) |actual_key| {
+                _ = expected.get(actual_key) orelse {
+                    std.log.err("extraneous entry {s}", .{actual_key});
+                    return error.TestExpectedEqual;
+                };
+            }
+        }
+
+        pub inline fn len(self: *const Map) usize {
+            return self.hash_map.entries.len;
+        }
+
+        pub fn set(self: *Map, key: []const u8, value: Value) !void {
+            const key_copy = try self.allocator.alloc(u8, key.len);
+            @memcpy(key_copy, key);
+            errdefer self.allocator.free(key_copy);
+
+            // TODO: check/free existing entry
+
+            try self.hash_map.put(self.allocator, key_copy, value);
+            value.ref();
+        }
+
+        pub fn delete(self: *Map, key: []const u8) !void {
+            if (self.hash_map.fetchSwapRemove(key)) |entry| {
+                self.allocator.free(entry.key);
+                entry.value.unref();
+            }
+        }
+
+        pub inline fn get(self: *const Map, key: []const u8) ?Value {
+            return self.hash_map.get(key);
+        }
+
+        pub inline fn keys(self: *const Map) []const []const u8 {
+            return self.hash_map.keys();
+        }
+
+        pub inline fn values(self: *const Map) []const Value {
+            return self.hash_map.values();
+        }
+
+        pub inline fn sort(self: *Map) void {
+            self.hash_map.sortUnstable(SortContext{ .keys = self.hash_map.keys() });
+        }
+    };
+
+    pub const String = struct {
+        allocator: std.mem.Allocator,
+        refs: u32,
+        data: []const u8,
+
+        /// copies `data` using `allocator`
+        pub fn create(allocator: std.mem.Allocator, data: []const u8) !*String {
+            const data_copy = try allocator.alloc(u8, data.len);
+            @memcpy(data_copy, data);
+            errdefer allocator.free(data_copy);
+
+            const string = try allocator.create(String);
+            string.allocator = allocator;
+            string.refs = 1;
+            string.data = data_copy;
+            return string;
+        }
+
+        /// increment reference count
+        pub inline fn ref(self: *String) void {
+            self.refs += 1;
+        }
+
+        /// decrement reference count, freeing all data on self.refs == 0
+        pub fn unref(self: *String) void {
+            if (self.refs == 0) @panic("ref count already at zero");
+
+            self.refs -= 1;
+            if (self.refs == 0) {
+                self.allocator.free(self.data);
+                self.allocator.destroy(self);
+            }
+        }
+
+        pub inline fn eql(self: *const String, other: *const String) bool {
+            return std.mem.eql(u8, self.data, other.data);
+        }
+
+        pub inline fn expectEqual(actual: *const String, expected: *const String) error{TestExpectedEqual}!void {
+            try std.testing.expectEqualSlices(u8, actual.data, expected.data);
+        }
+    };
+
+    pub const Bytes = struct {
+        allocator: std.mem.Allocator,
+        refs: u32,
+        data: []const u8,
+
+        /// copies `data` using `allocator`
+        pub fn create(allocator: std.mem.Allocator, data: []const u8) !*Bytes {
+            const data_copy = try allocator.alloc(u8, data.len);
+            @memcpy(data_copy, data);
+            errdefer allocator.free(data_copy);
+
+            const bytes = try allocator.create(Bytes);
+            bytes.allocator = allocator;
+            bytes.refs = 1;
+            bytes.data = data_copy;
+            return bytes;
+        }
+
+        /// decodes base-prefixed `str` using `base` and `allocator`
+        pub fn baseDecode(allocator: std.mem.Allocator, str: []const u8, base: multibase.Base) !*Bytes {
+            const data_copy = try base.baseDecode(allocator, str);
+            errdefer allocator.free(data_copy);
+
+            const bytes = try allocator.create(Bytes);
+            bytes.allocator = allocator;
+            bytes.refs = 1;
+            bytes.data = data_copy;
+            return bytes;
+        }
+
+        /// increment reference count
+        pub inline fn ref(self: *Bytes) void {
+            self.refs += 1;
+        }
+
+        /// decrement reference count, freeing all data on self.refs == 0
+        pub fn unref(self: *Bytes) void {
+            if (self.refs == 0) @panic("ref count already at zero");
+
+            self.refs -= 1;
+            if (self.refs == 0) {
+                self.allocator.free(self.data);
+                self.allocator.destroy(self);
+            }
+        }
+
+        pub inline fn eql(self: *const Bytes, other: *const Bytes) bool {
+            return std.mem.eql(u8, self.data, other.data);
+        }
+
+        pub inline fn expectEqual(actual: *const Bytes, expected: *const Bytes) error{TestExpectedEqual}!void {
+            try std.testing.expectEqualSlices(u8, actual.data, expected.data);
+        }
+    };
+
+
+    pub const Link = struct {
+        allocator: std.mem.Allocator,
+        refs: u32,
+        cid: CID,
+
+        /// copies `cid` using `allocator`
+        pub fn create(allocator: std.mem.Allocator, cid: CID) !*Link {
+            const cid_copy = try cid.copy(allocator);
+            errdefer cid_copy.deinit(allocator);
+
+            const link = try allocator.create(Link);
+            link.allocator = allocator;
+            link.refs = 1;
+            link.cid = cid_copy;
+            return link;
+        }
+
+        /// parse a new CID from `str` using `allocator`
+        pub fn parse(allocator: std.mem.Allocator, str: []const u8) !*Link {
+            const cid = try CID.parse(allocator, str);
+            errdefer cid.deinit(allocator);
+
+            const link = try allocator.create(Link);
+            link.allocator = allocator;
+            link.refs = 1;
+            link.cid = cid;
+            return link;
+        }
+
+        /// decode a new CID from `bytes` using `allocator`
+        pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) !*Link {
+            const cid = try CID.decode(allocator, bytes);
+            errdefer cid.deinit(allocator);
+
+            const link = try allocator.create(Link);
+            link.allocator = allocator;
+            link.refs = 1;
+            link.cid = cid;
+            return link;
+        }
+
+        /// increment reference count
+        pub inline fn ref(self: *Link) void {
+            self.refs += 1;
+        }
+
+        /// decrement reference count, freeing all data on self.refs == 0
+        pub fn unref(self: *Link) void {
+            if (self.refs == 0) @panic("ref count already at zero");
+
+            self.refs -= 1;
+            if (self.refs == 0) {
+                self.cid.deinit(self.allocator);
+                self.allocator.destroy(self);
+            }
+        }
+
+        pub inline fn eql(self: *const Link, other: *const Link) bool {
+            return self.cid.eql(other.cid);
+        }
+
+        pub inline fn expectEqual(actual: *const Link, expected: *const Link) error{TestExpectedEqual}!void {
+            try actual.cid.expectEqual(expected.cid);
+        }
+    };
+
     null: void,
     boolean: bool,
     integer: i64,
