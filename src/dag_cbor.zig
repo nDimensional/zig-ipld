@@ -104,13 +104,13 @@ pub const Decoder = struct {
             .UnsignedInteger => {
                 const max = comptime std.math.maxInt(i64);
                 const value = try self.readArgumentInt(header, reader);
-                if (value > max) return error.IntegerOverflow;
+                if (value > max) return error.Overflow;
                 return Value.integer(@intCast(value));
             },
             .NegativeInteger => {
                 const max = comptime (1 << 63) - 1;
                 const value = try self.readArgumentInt(header, reader);
-                if (value > max) return error.IntegerUnderflow;
+                if (value > max) return error.Overflow;
                 return Value.integer(-1 - @as(i64, @intCast(value)));
             },
             .ByteString => {
@@ -126,8 +126,11 @@ pub const Decoder = struct {
                 return try Value.createString(allocator, self.buffer.items);
             },
             .Array => {
-                const list = try List.create(allocator, .{});
                 const len = try self.readArgumentInt(header, reader);
+
+                const list = try List.create(allocator, .{});
+                errdefer list.unref();
+
                 try list.array_list.ensureTotalCapacity(allocator, len);
                 for (0..len) |_| {
                     const value = try self.readValue(allocator, reader);
@@ -138,7 +141,10 @@ pub const Decoder = struct {
             },
             .Map => {
                 const len = try self.readArgumentInt(header, reader);
+
                 var map = try Map.create(allocator, .{});
+                errdefer map.unref();
+
                 try map.hash_map.ensureTotalCapacity(allocator, len);
                 for (0..len) |_| {
                     const key = try self.copyTextString(reader);

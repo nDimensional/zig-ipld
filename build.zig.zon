@@ -9,8 +9,8 @@
     },
     .dependencies = .{
         .multiformats = .{
-            .url = "https://github.com/nDimensional/zig-multiformats/archive/refs/tags/v0.1.0.tar.gz",
-            .hash = "1220541af4ae4e763aa59d4f3ed7af96b7b21720c4c2a390f72d286f9ddfe8bc548b",
+            .url = "https://github.com/nDimensional/zig-multiformats/archive/7f03e95d54f96f0868ab1ce6cdd84cc086e57e96.tar.gz",
+            .hash = "1220eaf15255413b5fafd17551b5a860bd4fb43efadc8f7152db1a25aa41c767c187",
         },
     },
 }

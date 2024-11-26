@@ -60,8 +60,11 @@ pub const List = struct {
         return true;
     }
 
-    pub fn expectEqual(self: *const List, other: *const List) !void {
-        try std.testing.expect(self.eql(other));
+    pub fn expectEqual(actual: *const List, expected: *const List) error{TestExpectedEqual}!void {
+        try std.testing.expectEqual(actual.len(), expected.len());
+        for (actual.array_list.items, expected.array_list.items) |actual_item, expected_item| {
+            try actual_item.expectEqual(expected_item);
+        }
     }
 
     pub inline fn len(self: *const List) usize {
@@ -184,8 +187,24 @@ pub const Map = struct {
         return true;
     }
 
-    pub fn expectEqual(self: *const Map, other: *const Map) !void {
-        try std.testing.expect(self.eql(other));
+    pub fn expectEqual(expected: *const Map, actual: *const Map) error{TestExpectedEqual}!void {
+        for (expected.keys(), expected.values()) |expected_key, expected_value| {
+            if (actual.get(expected_key)) |actual_value| {
+                try expected_value.expectEqual(actual_value);
+            } else {
+                std.log.err("missing expected key {s}", .{expected_key});
+                return error.TestExpectedEqual;
+            }
+        }
+
+        for (actual.keys(), actual.values()) |actual_key, actual_value| {
+            if (expected.get(actual_key)) |expected_value| {
+                try actual_value.expectEqual(expected_value);
+            } else {
+                std.log.err("extraneous entry {s}", .{actual_key});
+                return error.TestExpectedEqual;
+            }
+        }
     }
 
     pub inline fn len(self: *const Map) usize {
@@ -265,7 +284,7 @@ pub const String = struct {
         return std.mem.eql(u8, self.data, other.data);
     }
 
-    pub inline fn expectEqual(actual: *const String, expected: *const String) !void {
+    pub inline fn expectEqual(actual: *const String, expected: *const String) error{TestExpectedEqual}!void {
         try std.testing.expectEqualSlices(u8, actual.data, expected.data);
     }
 };
@@ -320,7 +339,7 @@ pub const Bytes = struct {
         return std.mem.eql(u8, self.data, other.data);
     }
 
-    pub inline fn expectEqual(actual: *const Bytes, expected: *const Bytes) !void {
+    pub inline fn expectEqual(actual: *const Bytes, expected: *const Bytes) error{TestExpectedEqual}!void {
         try std.testing.expectEqualSlices(u8, actual.data, expected.data);
     }
 };
@@ -386,7 +405,7 @@ pub const Link = struct {
         return self.cid.eql(other.cid);
     }
 
-    pub inline fn expectEqual(actual: *const Link, expected: *const Link) !void {
+    pub inline fn expectEqual(actual: *const Link, expected: *const Link) error{TestExpectedEqual}!void {
         try actual.cid.expectEqual(expected.cid);
     }
 };
@@ -533,7 +552,7 @@ pub const Value = union(Kind) {
         };
     }
 
-    pub fn expectEqual(actual: Value, expected: Value) !void {
+    pub fn expectEqual(actual: Value, expected: Value) error{TestExpectedEqual}!void {
         switch (actual) {
             .null => try std.testing.expectEqual(actual, expected),
             .boolean => try std.testing.expectEqual(actual, expected),
@@ -541,23 +560,23 @@ pub const Value = union(Kind) {
             .float => try std.testing.expectEqual(actual, expected),
             .string => |string_self| switch (expected) {
                 .string => |string_other| try string_self.expectEqual(string_other),
-                else => return error.DifferentKind,
+                else => return error.TestExpectedEqual,
             },
             .bytes => |bytes_self| switch (expected) {
                 .bytes => |bytes_other| try bytes_self.expectEqual(bytes_other),
-                else => return error.DifferentKind,
+                else => return error.TestExpectedEqual,
             },
             .list => |list_self| switch (expected) {
                 .list => |list_other| try list_self.expectEqual(list_other),
-                else => return error.DifferentKind,
+                else => return error.TestExpectedEqual,
             },
             .map => |map_self| switch (expected) {
                 .map => |map_other| try map_self.expectEqual(map_other),
-                else => return error.DifferentKind,
+                else => return error.TestExpectedEqual,
             },
             .link => |link_self| switch (expected) {
                 .link => |link_other| try link_self.expectEqual(link_other),
-                else => return error.DifferentKind,
+                else => return error.TestExpectedEqual,
             },
         }
     }

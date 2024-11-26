@@ -38,48 +38,26 @@ pub const Decoder = struct {
         return value;
     }
 
-    ///  <document> = <value> .end_of_document
-    ///  <value> =
-    ///    | <object>
-    ///    | <array>
-    ///    | <number>
-    ///    | <string>
-    ///    | .true
-    ///    | .false
-    ///    | .null
-    ///  <object> = .object_begin ( <string> <value> )* .object_end
-    ///  <array> = .array_begin ( <value> )* .array_end
-    ///  <number> = ( .partial_number )* .number
-    ///  <string> = ( <partial_string> )* .string
-    ///  <partial_string> =
-    ///    | .partial_string
-    ///    | .partial_string_escaped_1
-    ///    | .partial_string_escaped_2
-    ///    | .partial_string_escaped_3
-    ///    | .partial_string_escaped_4
+    //  <document> = <value> .end_of_document
+    //  <value> =
+    //    | <object>
+    //    | <array>
+    //    | <number>
+    //    | <string>
+    //    | .true
+    //    | .false
+    //    | .null
+    //  <object> = .object_begin ( <string> <value> )* .object_end
+    //  <array> = .array_begin ( <value> )* .array_end
+    //  <number> = ( .partial_number )* .number
+    //  <string> = ( <partial_string> )* .string
+    //  <partial_string> =
+    //    | .partial_string
+    //    | .partial_string_escaped_1
+    //    | .partial_string_escaped_2
+    //    | .partial_string_escaped_3
+    //    | .partial_string_escaped_4
 
-    // object_begin,
-    // object_end,
-    // array_begin,
-    // array_end,
-
-    // true,
-    // false,
-    // null,
-
-    // number: []const u8,
-    // partial_number: []const u8,
-    // allocated_number: []u8,
-
-    // string: []const u8,
-    // partial_string: []const u8,
-    // partial_string_escaped_1: [1]u8,
-    // partial_string_escaped_2: [2]u8,
-    // partial_string_escaped_3: [3]u8,
-    // partial_string_escaped_4: [4]u8,
-    // allocated_string: []u8,
-
-    // end_of_document,
     pub fn readValue(self: *Decoder, allocator: std.mem.Allocator, reader: std.io.AnyReader) !Value {
         var r = std.json.reader(allocator, reader);
         defer r.deinit();
@@ -103,11 +81,11 @@ pub const Decoder = struct {
         switch (try reader.peekNextTokenType()) {
             .string => {
                 const str = try self.copyString(reader);
-                return Value.createString(allocator, str);
+                return try Value.createString(allocator, str);
             },
             .number => {
                 const str = try self.copyNumber(reader);
-                if (std.mem.indexOf(u8, str, ".")) |_| {
+                if (std.mem.indexOfScalar(u8, str, '.') != null or std.mem.indexOfScalar(u8, str, 'e') != null) {
                     const value = try std.fmt.parseFloat(f64, str);
                     return Value.float(value);
                 } else {
@@ -132,7 +110,6 @@ pub const Decoder = struct {
                             .string => {
                                 // parse Link
                                 const str = try self.copyString(reader);
-                                const link = try Link.parse(allocator, str);
 
                                 // closing brace for { "/": ... }
                                 switch (try reader.next()) {
@@ -140,6 +117,7 @@ pub const Decoder = struct {
                                     else => return error.InvalidValue,
                                 }
 
+                                const link = try Link.parse(allocator, str);
                                 return .{ .link = link };
                             },
                             .object_begin => {
@@ -173,6 +151,7 @@ pub const Decoder = struct {
                     } else {
                         // normal map object
                         var map = try Map.create(allocator, .{});
+                        errdefer map.unref();
 
                         // parse value for first key
                         try map.set(first_key, Value.Null);
@@ -197,6 +176,8 @@ pub const Decoder = struct {
                 .object_end => unreachable,
                 .array_begin => {
                     var list = try List.create(allocator, .{});
+                    errdefer list.unref();
+
                     while (try reader.peekNextTokenType() != .array_end) {
                         const value = try self.readValueNext(allocator, reader);
                         try list.array_list.append(allocator, value);
@@ -253,25 +234,12 @@ pub const Decoder = struct {
         self.buffer.clearRetainingCapacity();
         while (true) {
             switch (try reader.next()) {
-                .partial_string => |chunk| {
-                    std.log.warn("partial_string: {s}", .{chunk});
-                    try self.buffer.appendSlice(chunk);
-                },
-                .partial_string_escaped_1 => |chunk| {
-                    std.log.warn("partial_string_escaped_1: {s}", .{chunk});
-                },
-                .partial_string_escaped_2 => |chunk| {
-                    std.log.warn("partial_string_escaped_2: {s}", .{chunk});
-                    // ...
-                },
-                .partial_string_escaped_3 => |chunk| {
-                    std.log.warn("partial_string_escaped_3: {s}", .{chunk});
-                },
-                .partial_string_escaped_4 => |chunk| {
-                    std.log.warn("partial_string_escaped_4: {s}", .{chunk});
-                },
+                .partial_string => |chunk| try self.buffer.appendSlice(chunk),
+                .partial_string_escaped_1 => |chunk| try self.buffer.append(chunk[0]),
+                .partial_string_escaped_2 => |chunk| try self.buffer.appendSlice(&chunk),
+                .partial_string_escaped_3 => |chunk| try self.buffer.appendSlice(&chunk),
+                .partial_string_escaped_4 => |chunk| try self.buffer.appendSlice(&chunk),
                 .string => |chunk| {
-                    std.log.warn("string: {s}", .{chunk});
                     try self.buffer.appendSlice(chunk);
                     return self.buffer.items;
                 },

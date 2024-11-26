@@ -24,7 +24,9 @@ pub fn build(b: *std.Build) void {
     // Tests
 
     const ipld_tests = b.addTest(.{ .root_source_file = b.path("src/test.zig") });
+    ipld_tests.root_module.addImport("cid", cid);
     ipld_tests.root_module.addImport("multicodec", multicodec);
+    ipld_tests.root_module.addImport("multibase", multibase);
     ipld_tests.root_module.addImport("cid", cid);
     ipld_tests.root_module.addImport("ipld", ipld);
     const run_ipld_tests = b.addRunArtifact(ipld_tests);
