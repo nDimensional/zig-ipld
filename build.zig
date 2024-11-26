@@ -1,6 +1,9 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    const target = b.standardTargetOptions(.{});
+    const optimize = b.standardOptimizeOption(.{});
+
     // Dependencies
     const multiformats = b.dependency("multiformats", .{});
 
@@ -62,4 +65,18 @@ pub fn build(b: *std.Build) void {
     tests.dependOn(&run_ipld_tests.step);
     tests.dependOn(&run_dag_cbor_tests.step);
     tests.dependOn(&run_dag_json_tests.step);
+
+    // Example
+    const example = b.addExecutable(.{
+        .name = "zig-ipld-example",
+        .root_source_file = b.path("example.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    example.root_module.addImport("ipld", ipld);
+    example.root_module.addImport("dag-json", dag_json);
+    example.root_module.addImport("dag-cbor", dag_cbor);
+    const run_example = b.addRunArtifact(example);
+    b.step("run-example", "Run example.zig").dependOn(&run_example.step);
 }

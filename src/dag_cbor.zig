@@ -72,6 +72,7 @@ pub const Header = packed struct {
 
 pub const Decoder = struct {
     pub const Options = struct {
+        /// strict enforces sorted map keys and the "minimal size" requirements
         strict: bool = true,
     };
 
