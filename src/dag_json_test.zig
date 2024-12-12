@@ -7,7 +7,7 @@ const Header = json.Header;
 const Decoder = json.Decoder;
 const Encoder = json.Encoder;
 
-test "fixture values" {
+test "dynamic value fixture" {
     const Fixture = struct {
         value: Value,
         bytes: []const u8,
@@ -45,6 +45,8 @@ test "fixture values" {
         Fixture.init(Value.integer(std.math.minInt(i64)), "-9223372036854775808"),
         Fixture.init(Value.integer(std.math.maxInt(i64)), "9223372036854775807"),
 
+        // TODO
+        Fixture.init(Value.float(1), "1.0"),
         Fixture.init(Value.float(std.math.pi), "3.141592653589793"),
 
         Fixture.init(try Value.createMap(allocator, .{ .foo = Value.integer(4) }),
@@ -122,7 +124,7 @@ test "fixture values" {
 
     defer for (fixtures) |fixture| fixture.value.unref();
 
-    var encoder = Encoder.init(allocator, .{});
+    var encoder = Encoder.init(allocator, .{.float_format = .{.decimal = {}}});
     defer encoder.deinit();
 
     for (fixtures) |fixture| {
@@ -140,4 +142,227 @@ test "fixture values" {
 
         try Value.expectEqual(actual, fixture.value);
     }
+}
+
+test "static type fixtures" {
+    const Fixture = struct {
+        T: type,
+        value: *const anyopaque,
+        bytes: []const u8,
+
+        pub fn init(comptime T: type, comptime value: T, comptime bytes: []const u8) @This() {
+            return .{ .T = T, .value = &value, .bytes = bytes };
+        }
+
+        pub fn testDecoder(self: @This(), allocator: std.mem.Allocator, decoder: *Decoder) !void {
+            var arena = std.heap.ArenaAllocator.init(allocator);
+            defer arena.deinit();
+
+            const actual = try decoder.decodeType(self.T, arena.allocator(), self.bytes);
+            const expected: *const self.T = @alignCast(@ptrCast(self.value));
+            try std.testing.expectEqual(expected.*, actual);
+        }
+
+        pub fn testEncoder(self: @This(), allocator: std.mem.Allocator, encoder: *Encoder) !void {
+            var arena = std.heap.ArenaAllocator.init(allocator);
+            defer arena.deinit();
+
+            const value: *const self.T = @alignCast(@ptrCast(self.value));
+            const actual = try encoder.encodeType(self.T, arena.allocator(), value.*);
+            try std.testing.expectEqualSlices(u8, self.bytes, actual);
+        }
+    };
+
+    const fixtures: []const Fixture = &.{
+        Fixture.init(bool, false, "false"),
+        Fixture.init(bool, true, "true"),
+
+        Fixture.init(u8, 0, "0"),
+        Fixture.init(u8, 1, "1"),
+        Fixture.init(u8, 23, "23"),
+        Fixture.init(u8, 255, "255"),
+
+        Fixture.init(?u8, 255, "255"),
+        Fixture.init(?u8, null, "null"),
+
+        Fixture.init(u16, 0, "0"),
+        Fixture.init(u16, 0xffff, "65535"),
+        Fixture.init(u24, 0xffffff, "16777215"),
+        Fixture.init(u32, 0xffffffff, "4294967295"),
+
+        Fixture.init(struct { foo: u32 }, .{ .foo = 4 },
+        \\{"foo":4}
+        ),
+
+        Fixture.init(struct { foo: u32, bar: ?bool }, .{ .foo = 4, .bar = null },
+        \\{"bar":null,"foo":4}
+        ),
+
+        Fixture.init(struct {u32, ?bool}, .{4, false},
+        \\[4,false]
+        ),
+    };
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(gpa.deinit() == .ok);
+    const allocator = gpa.allocator();
+
+    var encoder = Encoder.init(allocator, .{});
+    defer encoder.deinit();
+
+    var decoder = Decoder.init(allocator, .{});
+    defer decoder.deinit();
+
+    inline for (fixtures) |fixture| {
+        const value: *const fixture.T = @alignCast(@ptrCast(fixture.value));
+
+        fixture.testDecoder(allocator, &decoder) catch |err| {
+            std.log.err("failed to decode fixture", .{});
+            std.log.err("- value {any}: {any}", .{fixture.T, value.*});
+            std.log.err("- bytes {}", .{std.fmt.fmtSliceHexLower(fixture.bytes)});
+            return err;
+        };
+
+        fixture.testEncoder(allocator, &encoder) catch |err| {
+            std.log.err("failed to encode fixture", .{});
+            std.log.err("- value {any}: {any}", .{fixture.T, value.*});
+            std.log.err("- bytes {}", .{std.fmt.fmtSliceHexLower(fixture.bytes)});
+            return err;
+        };
+    }
+
+    // {
+    //     // allocate a struct
+    //     const User = struct {
+    //         id: u32,
+    //     };
+
+    //     const expected_bytes: []const u8 = &.{
+    //         // zig fmt: off
+    //         (5 << 5) | 1,
+    //             (3 << 5) | 2, 'i', 'd',
+    //                 (0 << 5) | 24, 255,
+    //             // (3 << 5) | 5, 'e', 'm', 'a', 'i', 'l',
+    //             //     (3 << 5) | 17, 'h', 'e', 'l', 'l', 'o', '@', 'e', 'x', 'a', 'm', 'p', 'l', 'e', '.', 'c', 'o', 'm',
+    //         // zig fmt: on
+    //     };
+
+    //     const user: *const User = try decoder.decodeType(*const User, allocator, expected_bytes);
+    //     // defer allocator.free(user.email);
+    //     defer allocator.destroy(user);
+
+    //     try std.testing.expectEqual(255, user.id);
+    //     // try std.testing.expectEqualSlices(u8, "hello@example.com", user.email);
+
+    //     // const actual_bytes = try encoder.encodeType(*const User, allocator, &.{ .id = 255, .email = "hello@example.com" });
+    //     const actual_bytes = try encoder.encodeType(*const User, allocator, &.{ .id = 255  });
+    //     defer allocator.free(actual_bytes);
+    //     try std.testing.expectEqualSlices(u8, expected_bytes, actual_bytes);
+    // }
+
+}
+
+test "encode and decode Enum as integer" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(gpa.deinit() == .ok);
+    const allocator = gpa.allocator();
+
+    var encoder = Encoder.init(allocator, .{});
+    defer encoder.deinit();
+
+    var decoder = Decoder.init(allocator, .{});
+    defer decoder.deinit();
+
+    // allocate a struct
+    const Status = enum(u8) {
+        pub const IpldKind = Value.Kind.integer;
+
+        Stopped = 0,
+        Started = 1,
+    };
+
+    const expected_bytes =
+        \\[0,1]
+    ;
+
+    const expected_value: []const Status = &.{.Stopped, .Started};
+
+    const actual_value = try decoder.decodeType([]const Status, allocator, expected_bytes);
+    defer allocator.free(actual_value);
+    try std.testing.expectEqualSlices(Status, expected_value, actual_value);
+
+    const actual_bytes = try encoder.encodeType([]const Status, allocator, expected_value);
+    defer allocator.free(actual_bytes);
+    try std.testing.expectEqualSlices(u8, expected_bytes, actual_bytes);
+}
+
+test "encode and decode Enum as string" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(gpa.deinit() == .ok);
+    const allocator = gpa.allocator();
+
+    var encoder = Encoder.init(allocator, .{});
+    defer encoder.deinit();
+
+    var decoder = Decoder.init(allocator, .{});
+    defer decoder.deinit();
+
+    // encode/decode Enum as a string
+    // allocate a struct
+    const Status = enum(u8) {
+        pub const IpldKind = Value.Kind.string;
+
+        Stopped = 0,
+        Started = 1,
+    };
+
+    const expected_bytes =
+        \\["Stopped","Started"]
+    ;
+
+    const expected_value: []const Status = &.{.Stopped, .Started};
+
+    const actual_value = try decoder.decodeType([]const Status, allocator, expected_bytes);
+    defer allocator.free(actual_value);
+    try std.testing.expectEqualSlices(Status, expected_value, actual_value);
+
+    const actual_bytes = try encoder.encodeType([]const Status, allocator, expected_value);
+    defer allocator.free(actual_bytes);
+    try std.testing.expectEqualSlices(u8, expected_bytes, actual_bytes);
+}
+
+fn testFloatEncoding(allocator: std.mem.Allocator, float_format: Encoder.FloatFormat, value: f64, expected: []const u8) !void {
+    var encoder = Encoder.init(allocator, .{.float_format = float_format});
+    defer encoder.deinit();
+    const actual = try encoder.encodeType(f64, allocator, value);
+    defer allocator.free(actual);
+    try std.testing.expectEqualSlices(u8, expected, actual);
+}
+
+test "float encoding modes" {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer std.debug.assert(gpa.deinit() == .ok);
+    const allocator = gpa.allocator();
+
+    try testFloatEncoding(allocator, .{.scientific = {}}, 0, "0e0");
+    try testFloatEncoding(allocator, .{.scientific = {}}, 1, "1e0");
+    try testFloatEncoding(allocator, .{.decimal = {}}, 0.01, "0.01");
+    try testFloatEncoding(allocator, .{.decimal_in_range = .{
+        .min_exp10 = -2,
+    }}, 0.01, "0.01");
+    try testFloatEncoding(allocator, .{.decimal_in_range = .{
+        .min_exp10 = -2,
+    }}, 0.009, "9e-3");
+    try testFloatEncoding(allocator, .{.decimal_in_range = .{
+        .min_exp10 = -1,
+        .max_exp10 = 1,
+    }}, 10, "10.0");
+    try testFloatEncoding(allocator, .{.decimal_in_range = .{
+        .min_exp10 = -1,
+        .max_exp10 = 1,
+    }}, 99.99, "99.99");
+    try testFloatEncoding(allocator, .{.decimal_in_range = .{
+        .min_exp10 = -1,
+        .max_exp10 = 1,
+    }}, 100.111, "1.00111e2");
 }

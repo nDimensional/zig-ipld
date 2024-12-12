@@ -114,30 +114,6 @@ pub const Value = union(ValueKind) {
     };
 
     pub const Map = struct {
-        const SortContext = struct {
-            keys: []const []const u8,
-
-            pub fn lessThan(ctx: SortContext, a_index: usize, b_index: usize) bool {
-                const a = ctx.keys[a_index];
-                const b = ctx.keys[b_index];
-
-                // First compare lengths
-                if (a.len != b.len) {
-                    return a.len < b.len;
-                }
-
-                // If lengths are equal, compare lexicographically
-                var i: usize = 0;
-                while (i < a.len) : (i += 1) {
-                    if (a[i] != b[i]) {
-                        return a[i] < b[i];
-                    }
-                }
-
-                return false;
-            }
-        };
-
         const HashMap = std.StringArrayHashMapUnmanaged(Value);
 
         allocator: std.mem.Allocator,
@@ -254,8 +230,8 @@ pub const Value = union(ValueKind) {
             return self.hash_map.values();
         }
 
-        pub inline fn sort(self: *Map) void {
-            self.hash_map.sortUnstable(SortContext{ .keys = self.hash_map.keys() });
+        pub inline fn sort(self: *Map, sort_ctx: anytype) void {
+            self.hash_map.sortUnstable(sort_ctx);
         }
     };
 
@@ -356,7 +332,6 @@ pub const Value = union(ValueKind) {
             try std.testing.expectEqualSlices(u8, actual.data, expected.data);
         }
     };
-
 
     pub const Link = struct {
         allocator: std.mem.Allocator,
@@ -579,6 +554,54 @@ pub const Value = union(ValueKind) {
                 .link => |link_other| try link_self.expectEqual(link_other),
                 else => return error.TestExpectedEqual,
             },
+        }
+    }
+
+    /// Format a Value
+    pub fn format(self: Value, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        switch (self) {
+            .null => try std.fmt.format(writer, "Value(Null)", .{}),
+            .boolean => |value| try std.fmt.format(writer, "Value(Boolean: {any})", .{value}),
+            .integer => |value| try std.fmt.format(writer, "Value(Integer: {d})", .{value}),
+            .float => |value| try std.fmt.format(writer, "Value(Float: {e})", .{value}),
+            .string => |value| {
+                try writer.writeAll("Value(String: ");
+                try std.json.encodeJsonString(value.data, .{ .escape_unicode = true }, writer);
+                try writer.writeAll(")");
+            },
+            .bytes => |value| {
+                try std.fmt.format(writer, "Value(Bytes: 0x{s})", .{
+                    std.fmt.fmtSliceHexLower(value.data),
+                });
+            },
+            .list => |value| {
+                const items = value.values();
+                if (items.len == 0)
+                    return try writer.writeAll("Value(List: [])");
+
+                try writer.writeAll("Value(List: [ ");
+                for (items, 0..) |item, i| {
+                    if (i > 0) try writer.writeAll(", ");
+                    try std.fmt.format(writer, "{any}", .{item});
+                }
+
+                try writer.writeAll(" ])");
+            },
+            .map => |value| {
+                if (value.len() == 0)
+                    return try writer.writeAll("Value(Map: {})");
+
+                try writer.writeAll("Value(Map: { ");
+                for (value.keys(), value.values(), 0..) |k, v, i| {
+                    if (i > 0) try writer.writeAll(", ");
+                    try std.json.encodeJsonString(k, .{ .escape_unicode = true }, writer);
+                    try std.fmt.format(writer, " -> {any}", .{v});
+                }
+                try writer.writeAll(" })");
+            },
+            .link => |value| try std.fmt.format(writer, "Value(Link: {s})", .{value.cid}),
         }
     }
 };

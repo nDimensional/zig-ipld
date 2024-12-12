@@ -41,7 +41,16 @@ test "ipld/codec-fixtures" {
     const allocator = gpa.allocator();
     defer std.debug.assert(gpa.deinit() == .ok);
 
-    var json_encoder = json.Encoder.init(allocator, .{});
+    // const m = @abs(value);
+    // if (0.01 <= m and m < 100000) {
+    //     try std.fmt.format(writer, "{d}", .{value});
+    // } else {
+    //     try std.fmt.format(writer, "{e}", .{value});
+    // }
+
+    var json_encoder = json.Encoder.init(allocator, .{
+        .float_format = json.Encoder.FloatFormat.decimalInRange(-2, 5),
+    });
     defer json_encoder.deinit();
     var json_decoder = json.Decoder.init(allocator, .{});
     defer json_decoder.deinit();
@@ -90,15 +99,32 @@ test "ipld/codec-fixtures" {
             }
         }
 
-        // std.log.warn("now decoding {s}/{s}.dag-cbor", .{ entry.name, cbor_fixture.cid });
-        const cbor_value = try cbor_decoder.readValue(allocator, cbor_fixture.file.reader().any());
+        const cbor_fixture_bytes = try cbor_fixture.file.readToEndAlloc(allocator, std.math.maxInt(usize));
+        defer allocator.free(cbor_fixture_bytes);
+
+        const json_fixture_bytes = try json_fixture.file.readToEndAlloc(allocator, std.math.maxInt(usize));
+        defer allocator.free(json_fixture_bytes);
+
+        std.log.warn("now decoding {s}/{s}.dag-cbor", .{ entry.name, cbor_fixture.cid });
+        const cbor_value = try cbor_decoder.decodeValue(allocator, cbor_fixture_bytes);
         defer cbor_value.unref();
 
-        // std.log.warn("now decoding {s}/{s}.dag-json", .{ entry.name, json_fixture.cid });
-        const json_value = try json_decoder.readValue(allocator, json_fixture.file.reader().any());
+        std.log.warn("now decoding {s}/{s}.dag-json", .{ entry.name, json_fixture.cid });
+        const json_value = try json_decoder.decodeValue(allocator, json_fixture_bytes);
         defer json_value.unref();
 
-        try cbor_value.expectEqual(json_value);
+        try Value.expectEqual(cbor_value, json_value);
+
+        std.log.warn("got cbor value: {any}", .{cbor_value});
+        std.log.warn("got json value: {any}", .{json_value});
+
+        const encoded_cbor_bytes = try cbor_encoder.encodeValue(allocator, json_value);
+        defer allocator.free(encoded_cbor_bytes);
+        try std.testing.expectEqualSlices(u8, cbor_fixture_bytes, encoded_cbor_bytes);
+
+        const encoded_json_bytes = try json_encoder.encodeValue(allocator, cbor_value);
+        defer allocator.free(encoded_json_bytes);
+        try std.testing.expectEqualSlices(u8, json_fixture_bytes, encoded_json_bytes);
     }
 }
 
