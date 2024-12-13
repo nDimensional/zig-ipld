@@ -160,6 +160,17 @@ pub const Decoder = struct {
         strict: bool = true,
     };
 
+    pub fn Result(comptime T: type) type {
+        return struct {
+            arena: std.heap.ArenaAllocator,
+            value: T,
+
+            pub inline fn deinit(self: @This()) void {
+                self.arena.deinit();
+            }
+        };
+    }
+
     options: Options,
     buffer: std.ArrayList(u8),
     argument_buffer: [8]u8 = undefined,
@@ -175,15 +186,27 @@ pub const Decoder = struct {
         self.buffer.deinit();
     }
 
-    pub fn decodeType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, data: []const u8) !T {
+    pub fn decodeType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, data: []const u8) !Result(T) {
         var stream = std.io.fixedBufferStream(data);
         const reader = stream.reader().any();
-        const value = try self.readType(T, allocator, reader);
-        if (stream.pos != data.len) return error.ExtraneousData;
-        return value;
+        const result = try self.readType(T, allocator, reader);
+        if (stream.pos != data.len) {
+            result.deinit();
+            return error.ExtraneousData;
+        }
+
+        return result;
     }
 
-    pub inline fn readType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: std.io.AnyReader) !T {
+    pub fn readType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: std.io.AnyReader) !Result(T) {
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        errdefer arena.deinit();
+
+        const value = try self.readTypeAlloc(T, arena.allocator(), reader);
+        return .{ .arena = arena, .value = value };
+    }
+
+    inline fn readTypeAlloc(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: std.io.AnyReader) !T {
         if (T == Value)
             return try self.readValue(allocator, reader);
 
@@ -287,7 +310,7 @@ pub const Decoder = struct {
 
                 var result: T = undefined;
                 for (0..len) |i|
-                    result[i] = try self.readType(info.child, allocator, reader);
+                    result[i] = try self.readTypeAlloc(info.child, allocator, reader);
 
                 return result;
             },
@@ -305,7 +328,7 @@ pub const Decoder = struct {
                     const items = try allocator.alloc(info.child, len);
                     errdefer allocator.free(items);
 
-                    for (items) |*item| item.* = try self.readType(info.child, allocator, reader);
+                    for (items) |*item| item.* = try self.readTypeAlloc(info.child, allocator, reader);
                     return items;
                 },
                 .Many => @compileError("cannot generate IPLD decoder for [*]T pointers"),
@@ -334,7 +357,7 @@ pub const Decoder = struct {
                             else => @compileError("T.decodeIpldInteger must be a function of a single integer argument"),
                         }
 
-                        const int_value = try self.readType(Int, allocator, reader);
+                        const int_value = try self.readTypeAlloc(Int, allocator, reader);
                         return try T.decodeIpldInteger(int_value);
                     } else if (comptime std.mem.eql(u8, decl.name, "decodeIpldString")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.decodeIpldString))) {
@@ -381,7 +404,7 @@ pub const Decoder = struct {
 
                     var result: T = undefined;
                     inline for (info.fields) |field|
-                        @field(result, field.name) = try self.readType(field.type, allocator, reader);
+                        @field(result, field.name) = try self.readTypeAlloc(field.type, allocator, reader);
 
                     return result;
                 } else {
@@ -398,7 +421,7 @@ pub const Decoder = struct {
                             const field = info.fields[field_index];
                             const key = try self.copyTextString(reader);
                             if (!std.mem.eql(u8, key, field.name)) return error.InvalidType;
-                            @field(result, field.name) = try self.readType(field.type, allocator, reader);
+                            @field(result, field.name) = try self.readTypeAlloc(field.type, allocator, reader);
                         }
                     } else {
                         var result_fields: [info.fields.len]bool = .{false} ** info.fields.len;
@@ -406,7 +429,7 @@ pub const Decoder = struct {
                             const key = try self.copyTextString(reader);
                             inline for (info.fields, 0..) |field, field_index| {
                                 if (std.mem.eql(u8, key, field.name)) {
-                                    @field(result, field.name) = try self.readType(field.type, allocator, reader);
+                                    @field(result, field.name) = try self.readTypeAlloc(field.type, allocator, reader);
                                     result_fields[field_index] = true;
                                     continue :outer;
                                 }

@@ -97,6 +97,17 @@ pub const Decoder = struct {
         strict: bool = true,
     };
 
+    pub fn Result(comptime T: type) type {
+        return struct {
+            arena: std.heap.ArenaAllocator,
+            value: T,
+
+            pub inline fn deinit(self: @This()) void {
+                self.arena.deinit();
+            }
+        };
+    }
+
     options: Options,
     allocator: std.mem.Allocator,
     buffer: std.ArrayListUnmanaged(u8),
@@ -113,19 +124,26 @@ pub const Decoder = struct {
         self.buffer.deinit(self.allocator);
     }
 
-    pub fn decodeType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, data: []const u8) !T {
+    pub fn decodeType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, data: []const u8) !Result(T) {
         var stream = std.io.fixedBufferStream(data);
         const reader = stream.reader().any();
-        const value = try self.readType(T, allocator, reader);
-        if (stream.pos != data.len) return error.ExtraneousData;
-        return value;
+        const result = try self.readType(T, allocator, reader);
+        if (stream.pos != data.len) {
+            result.deinit();
+            return error.ExtraneousData;
+        }
+
+        return result;
     }
 
-    pub fn readType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: std.io.AnyReader) !T {
-        var r = std.json.reader(allocator, reader);
+    pub fn readType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: std.io.AnyReader) !Result(T) {
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        errdefer arena.deinit();
+
+        var r = std.json.reader(self.allocator, reader);
         defer r.deinit();
 
-        const value = try self.readTypeNext(T, allocator, &r);
+        const value = try self.readTypeNext(T, arena.allocator(), &r);
 
         // TODO: if this returns an error it leaks `value`
         switch (try r.next()) {
@@ -135,7 +153,8 @@ pub const Decoder = struct {
                 return error.ExpectedEOD;
             },
         }
-        return value;
+
+        return .{ .arena = arena, .value = value };
     }
 
     fn readTypeNext(
@@ -147,8 +166,10 @@ pub const Decoder = struct {
         if (T == Value)
             return try self.readValueNext(allocator, reader);
 
-        // if (T == String)
-        //     return try writeString(writer, value.data);
+        if (T == String) {
+            const str = try self.copyString(reader);
+            return try String.create(allocator, str);
+        }
 
         // if (T == Bytes)
         //     return try writeBytes(writer, value.data);
@@ -293,7 +314,7 @@ pub const Decoder = struct {
                             else => @compileError("T.decodeIpldInteger must be a function of a single integer argument"),
                         }
 
-                        const int_value = try self.readType(Int, allocator, reader);
+                        const int_value = try self.readTypeNext(Int, allocator, reader);
                         return try T.decodeIpldInteger(int_value);
                     } else if (comptime std.mem.eql(u8, decl.name, "decodeIpldString")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.decodeIpldString))) {
@@ -321,15 +342,8 @@ pub const Decoder = struct {
                             else => @compileError("T.decodeIpldBytes must be a function returning an error union of T"),
                         }
 
-                        try pop(reader, .object_begin);
-                        try self.expectString(reader, "/");
-                        try pop(reader, .object_begin);
-                        try self.expectString(reader, "bytes");
-
-                        const str = try self.copyString(reader);
-                        const bytes = try multibase.base64.decode(self.allocator, str);
+                        const bytes = try decodeBytes(self.allocator, reader);
                         defer self.allocator.free(bytes);
-
                         return try T.decodeIpldBytes(allocator, bytes);
                     }
                 }
@@ -563,6 +577,20 @@ pub const Decoder = struct {
                 else => unreachable,
             }
         }
+    }
+
+    fn decodeBytes(
+        self: *Decoder,
+        allocator: std.mem.Allocator,
+        reader: *std.json.Reader(std.json.default_buffer_size, std.io.AnyReader),
+    ) ![]const u8 {
+        try pop(reader, .object_begin);
+        try self.expectString(reader, "/");
+        try pop(reader, .object_begin);
+        try self.expectString(reader, "bytes");
+
+        const str = try self.copyString(reader);
+        return try multibase.base64.decode(allocator, str);
     }
 
     inline fn peek(

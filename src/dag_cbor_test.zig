@@ -28,21 +28,18 @@ test "static type fixtures" {
         }
 
         pub fn testDecoder(self: @This(), allocator: std.mem.Allocator, decoder: *Decoder) !void {
-            var arena = std.heap.ArenaAllocator.init(allocator);
-            defer arena.deinit();
+            const actual_result = try decoder.decodeType(self.T, allocator, self.bytes);
+            defer actual_result.deinit();
 
-            const actual = try decoder.decodeType(self.T, arena.allocator(), self.bytes);
-            const expected: *const self.T = @alignCast(@ptrCast(self.value));
-            try std.testing.expectEqual(expected.*, actual);
+            const expected_value: *const self.T = @alignCast(@ptrCast(self.value));
+            try std.testing.expectEqual(expected_value.*, actual_result.value);
         }
 
         pub fn testEncoder(self: @This(), allocator: std.mem.Allocator, encoder: *Encoder) !void {
-            var arena = std.heap.ArenaAllocator.init(allocator);
-            defer arena.deinit();
-
             const value: *const self.T = @alignCast(@ptrCast(self.value));
-            const actual = try encoder.encodeType(self.T, arena.allocator(), value.*);
-            try std.testing.expectEqualSlices(u8, self.bytes, actual);
+            const actual_bytes = try encoder.encodeType(self.T, allocator, value.*);
+            defer allocator.free(actual_bytes);
+            try std.testing.expectEqualSlices(u8, self.bytes, actual_bytes);
         }
     };
 
@@ -132,9 +129,9 @@ test "static type fixtures" {
             // zig fmt: on
         };
 
-        const user: *const User = try decoder.decodeType(*const User, allocator, expected_bytes);
-        // defer allocator.free(user.email);
-        defer allocator.destroy(user);
+        const user_result = try decoder.decodeType(*const User, allocator, expected_bytes);
+        defer user_result.deinit();
+        const user: *const User = user_result.value;
 
         try std.testing.expectEqual(255, user.id);
         // try std.testing.expectEqualSlices(u8, "hello@example.com", user.email);
@@ -176,9 +173,9 @@ test "encode and decode Enum as integer" {
 
     const expected_value: []const Status = &.{.Stopped, .Started};
 
-    const actual_value = try decoder.decodeType([]const Status, allocator, expected_bytes);
-    defer allocator.free(actual_value);
-    try std.testing.expectEqualSlices(Status, expected_value, actual_value);
+    const actual_result = try decoder.decodeType([]const Status, allocator, expected_bytes);
+    defer actual_result.deinit();
+    try std.testing.expectEqualSlices(Status, expected_value, actual_result.value);
 
     const actual_bytes = try encoder.encodeType([]const Status, allocator, expected_value);
     defer allocator.free(actual_bytes);
@@ -215,9 +212,9 @@ test "encode and decode Enum as string" {
 
     const expected_value: []const Status = &.{.Stopped, .Started};
 
-    const actual_value = try decoder.decodeType([]const Status, allocator, expected_bytes);
-    defer allocator.free(actual_value);
-    try std.testing.expectEqualSlices(Status, expected_value, actual_value);
+    const actual_result = try decoder.decodeType([]const Status, allocator, expected_bytes);
+    defer actual_result.deinit();
+    try std.testing.expectEqualSlices(Status, expected_value, actual_result.value);
 
     const actual_bytes = try encoder.encodeType([]const Status, allocator, expected_value);
     defer allocator.free(actual_bytes);
