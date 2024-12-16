@@ -4,7 +4,7 @@ Zig implementation of the IPLD data model, with dag-cbor and dag-json codecs.
 
 Provides two parallel APIs:
 
-- a "dynamic" heap-allocated `Value` type for manipulating arbitrary data model values
+- a "dynamic" heap-allocated `Value` type for manipulating arbitrary/heterogenous values
 - a "static" API for generating encoders and decoders for native Zig types at comptime
 
 Passes all tests in [ipld/codec-fixtures](https://github.com/ipld/codec-fixtures) except for `i64` integer overflow cases.
