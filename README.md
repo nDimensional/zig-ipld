@@ -15,7 +15,7 @@ Passes all tests in [ipld/codec-fixtures](https://github.com/ipld/codec-fixtures
 - [Usage](#usage)
   - [Creating dynamic values](#creating-dynamic-values)
   - [Encoding dynamic values](#encoding-dynamic-values)
-  - [Decoding dynamic values](#encoding-dynamic-values)
+  - [Decoding dynamic values](#decoding-dynamic-values)
   - [Static types](#static-types)
   - [Strings and bytes](#strings-and-bytes)
 
