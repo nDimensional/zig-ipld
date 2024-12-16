@@ -36,21 +36,12 @@ const Fixture = struct {
 };
 
 test "ipld/codec-fixtures" {
-    // const allocator = std.heap.c_allocator;
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator = gpa.allocator();
     defer std.debug.assert(gpa.deinit() == .ok);
 
-    // const m = @abs(value);
-    // if (0.01 <= m and m < 100000) {
-    //     try std.fmt.format(writer, "{d}", .{value});
-    // } else {
-    //     try std.fmt.format(writer, "{e}", .{value});
-    // }
-
-    var json_encoder = json.Encoder.init(allocator, .{
-        .float_format = json.Encoder.FloatFormat.decimalInRange(-2, 5),
-    });
+    const float_format = json.Encoder.FloatFormat.decimalInRange(-2, 5);
+    var json_encoder = json.Encoder.init(allocator, .{ .float_format = float_format });
     defer json_encoder.deinit();
     var json_decoder = json.Decoder.init(allocator, .{});
     defer json_decoder.deinit();
@@ -105,18 +96,18 @@ test "ipld/codec-fixtures" {
         const json_fixture_bytes = try json_fixture.file.readToEndAlloc(allocator, std.math.maxInt(usize));
         defer allocator.free(json_fixture_bytes);
 
-        std.log.warn("now decoding {s}/{s}.dag-cbor", .{ entry.name, cbor_fixture.cid });
+        // std.log.warn("now decoding {s}/{s}.dag-cbor", .{ entry.name, cbor_fixture.cid });
         const cbor_value = try cbor_decoder.decodeValue(allocator, cbor_fixture_bytes);
         defer cbor_value.unref();
 
-        std.log.warn("now decoding {s}/{s}.dag-json", .{ entry.name, json_fixture.cid });
+        // std.log.warn("now decoding {s}/{s}.dag-json", .{ entry.name, json_fixture.cid });
         const json_value = try json_decoder.decodeValue(allocator, json_fixture_bytes);
         defer json_value.unref();
 
         try Value.expectEqual(cbor_value, json_value);
 
-        std.log.warn("got cbor value: {any}", .{cbor_value});
-        std.log.warn("got json value: {any}", .{json_value});
+        // std.log.warn("got cbor value: {any}", .{cbor_value});
+        // std.log.warn("got json value: {any}", .{json_value});
 
         const encoded_cbor_bytes = try cbor_encoder.encodeValue(allocator, json_value);
         defer allocator.free(encoded_cbor_bytes);

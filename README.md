@@ -2,7 +2,10 @@
 
 Zig implementation of the IPLD data model, with dag-cbor and dag-json codecs.
 
-Currently only implements a "dynamic" heap-allocated `Value` type. An additional statically-typed variant for streaming directly to/from Zig types is in development.
+Provides two parallel APIs:
+
+- a "dynamic" heap-allocated `Value` type for manipulating arbitrary data model values
+- a "static" API for generating encoders and decoders for native Zig types at comptime
 
 Passes all tests in [ipld/codec-fixtures](https://github.com/ipld/codec-fixtures) except for `i64` integer overflow cases.
 
@@ -51,7 +54,7 @@ pub fn build(b: *std.Build) !void {
 ```zig
 const Value = @import("ipld").Value;
 
-// Value is a union over Value.Kind: enum {
+// Value is a union over ipld.Kind: enum {
 //   null, boolean, integer, float, string, bytes, list, map, link
 // }
 
@@ -114,4 +117,160 @@ pub fn main() !void {
 
 ### Static Types
 
-In development.
+Instead of allocating dynamic `Value` values, you can also decode directly into Zig types using the `decodeType` / `readType` decoder methods, and encode Zig types directly with `encodeType` / `writeType` decoder methods.
+
+The patterns for Zig type mapping are as follows:
+
+0. `ipld.Value` types use the dynamic API; this is like an "any" type.
+1. booleans are IPLD Booleans
+2. integer types are IPLD Integers, and error when decoding an integer out of range
+3. float types are IPLD Floats
+4. slices, arrays, and tuple `struct` types are IPLD lists
+5. non-tuple `struct` types are IPLD Maps
+6. optional types are `null` for IPLD Null, and match the unwrapped child type otherwise
+7. for pointer types:
+   - encoding dereferences the pointer and encodes the child type
+   - decoding allocates an element with `allocator.create` and decodes the child type into it
+
+A simple encoding example looks like this
+
+```zig
+const ipld = @import("ipld");
+const json = @import("dag-json");
+
+const Foo = struct { abc: u32, xyz: bool };
+
+{
+    var encoder = json.Encoder.init(allocator, .{});
+    defer encoder.deinit();
+
+    const data = try encoder.encodeType(Foo, allocator, .{
+        .bar = 8,
+        .baz = false,
+    });
+    defer allocator.free(data);
+
+    try std.testing.expectEqualSlices(u8, "{\"abc\":8,\"xyz\":false}", data);
+}
+```
+
+For decoding, `decodeType` returns a generic `Result(T)` struct that includes both the decoded `value: T` and a new `arena: ArenaAllocator` used for allocations within the value. This is unfortunately necessary since the decoder may encounter an error in the middle of decoding, and needs to be able to free the allocations in the partially-decoded value before returning the error to the user.
+
+```zig
+const ipld = @import("ipld");
+const json = @import("dag-json");
+
+const Foo = struct { abc: u32, xyz: *const Bar };
+const Bar = struct { id: u32, children: []const u32 };
+
+{
+    var decoder = json.Decoder.init(allocator, .{});
+    defer decoder.deinit();
+
+    const result = try encoder.decodeType(Foo, allocator,
+        \\{"abc":8,"xyz":{"id":9,"children":[1,2,10,87421]}}"
+    );
+    defer result.deinit(); // calls result.arena.deinit() inline
+    // result: json.Decoder.Result(Foo) is a struct {
+    //     arena: std.heap.ArenaAllocator,
+    //     value: Foo,
+    // }
+
+    try std.testing.expectEqual(result.value.abc, 8);
+    try std.testing.expectEqual(result.value.xyz.id, 9);
+    try std.testing.expectEqualSlices(u32, result.value.xyz.children, &.{1, 2, 10, 87421});
+}
+```
+
+### Strings and Bytes
+
+Handling strings and bytes is a point of unavoidable awkwardness. Idiomatic Zig generally uses `[]const u8` for both of these, but this is indistinguishable from "an array of `u8`" to zig-ipld. Furthermore, it's not possible to tell whether a user intends `[]const u8` to mean "string" or "bytes", and would be inappropriate to guess.
+
+The simplest way to use strings and bytes in static types is to use the special struct types `String` and `Bytes` exported from the `ipld` module, which have a single `data: []const u8` field. Note that these are different than the dynamic values `Value.String` and `Value.Bytes`.
+
+```zig
+const std = @import("std");
+const allocator = std.heap.c_allocator;
+
+const ipld = @import("ipld");
+const json = @import("dag-json");
+
+const User = struct {
+    id: u32,
+    email: ipld.String,
+};
+
+test "encode static User type" {
+    var encoder = json.Encoder.init(allocator, .{});
+    defer encoder.deinit();
+
+    const bytes = try encoder.encodeType(User, allocator, .{
+        .id = 10,
+        .email = .{ .data = "johndoe@example.com" },
+    });
+    defer allocator.free(bytes);
+
+    try std.testing.expectEqualSlices(u8, bytes,
+    \\{"email":"johndoe@example.com","id":10}
+    );
+}
+
+test "decode static User type" {
+    var decoder = json.Decoder.init(allocator, .{});
+    defer decoder.deinit();
+
+    const result = try decoder.decodeType(User, allocator,
+        \\{"email":"johndoe@example.com","id":1}
+    );
+    defer result.deinit();
+
+    try std.testing.expectEqual(result.value.id, 1);
+    try std.testing.expectEqualSlices(u8, result.value.email.data, "johndoe@example.com");
+}
+```
+
+If you want more flexibility, you can also add public function declarations to your struct/enum/union types to handle parsing to and from strings or bytes manually.
+
+To represent a struct/enum/union as a string, add declarations
+
+- `pub fn parseIpldString(allocator: std.mem.Allocator, data: []const u8) !@This()`
+- `pub fn writeIpldString(self: @This(), writer: std.io.AnyWriter) !void`
+
+For bytes, add
+
+- `pub fn parseIpldBytes(allocator: std.mem.Allocator, data: []const u8) !@This()`
+- `pub fn writeIpldBytes(self: @This(), writer: std.io.AnyWriter) !void`
+
+These are what the `String` and `Bytes` structs internally. When parsing, they copy `data` using `allocator`, and when writing, they just call `writer.writeAll(self.data)`.
+
+```zig
+pub const Bytes = struct {
+    data: []const u8,
+
+    pub fn parseIpldBytes(allocator: std.mem.Allocator, data: []const u8) !Bytes {
+        const copy = try allocator.alloc(u8, data.len);
+        @memcpy(copy, data);
+        return .{ .data = copy };
+    }
+
+    pub fn writeIpldBytes(self: Bytes, writer: std.io.AnyWriter) !void {
+        try writer.writeAll(self.data);
+    }
+};
+
+pub const String = struct {
+    data: []const u8,
+
+    pub fn parseIpldString(allocator: std.mem.Allocator, data: []const u8) !String {
+        const copy = try allocator.alloc(u8, data.len);
+        @memcpy(copy, data);
+        return .{ .data = copy };
+    }
+
+    pub fn writeIpldString(self: String, writer: std.io.AnyWriter) !void {
+        try writer.writeAll(self.data);
+    }
+};
+```
+
+For parsing, keep in mind that `allocator` is an arena allocator attached to the top-level `Result(T)`, so try to avoid making temporary allocations since they will be tied to the lifetime of the result even if you call `allocator.free(...)` etc.

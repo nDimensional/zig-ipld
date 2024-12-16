@@ -22,7 +22,7 @@ pub fn main() !void {
 
     defer example_value.unref();
 
-    // Encode value to bytes
+    // Encode a Value into bytes
 
     var cbor_encoder = cbor.Encoder.init(allocator, .{});
     defer cbor_encoder.deinit();
@@ -42,13 +42,9 @@ pub fn main() !void {
     const json_bytes = try json_encoder.encodeValue(allocator, example_value);
     defer allocator.free(json_bytes);
 
-    try std.testing.expectEqualSlices(
-        u8,
-        "[[],[null,42,true]]",
-        json_bytes,
-    );
+    try std.testing.expectEqualSlices(u8, "[[],[null,42,true]]", json_bytes);
 
-    // Decode bytes into Values
+    // Decode bytes into a Value
 
     var cbor_decoder = cbor.Decoder.init(allocator, .{});
     defer cbor_decoder.deinit();
@@ -63,4 +59,44 @@ pub fn main() !void {
     const json_value = try json_decoder.decodeValue(allocator, json_bytes);
     defer json_value.unref();
     try Value.expectEqual(json_value, example_value);
+
+    // Encode a static type
+    const User = struct {
+        id: u32,
+        email: ipld.String,
+    };
+
+    const user_json_bytes = try json_encoder.encodeType(User, allocator, .{
+        .id = 10,
+        .email = .{ .data = "johndoe@example.com" },
+    });
+    defer allocator.free(user_json_bytes);
+
+    try std.testing.expectEqualSlices(u8, user_json_bytes,
+    \\{"email":"johndoe@example.com","id":10}
+    );
+
+    // Decode a static type
+    const json_user_result = try json_decoder.decodeType(User, allocator, user_json_bytes);
+    defer json_user_result.deinit();
+
+    try std.testing.expectEqual(json_user_result.value.id, 10);
+    try std.testing.expectEqualSlices(u8, json_user_result.value.email.data, "johndoe@example.com");
+
+    const cbor_user_bytes = try cbor_encoder.encodeType(User, allocator, .{
+        .id = 10,
+        .email = .{ .data = "johndoe@example.com" },
+    });
+    defer allocator.free(cbor_user_bytes);
+
+    // try std.testing.expectEqualSlices(u8, cbor_user_bytes,
+    // \\{"email":"johndoe@example.com","id":10}
+    // );
+
+    // Decode a static type
+    const cbor_user_result = try cbor_decoder.decodeType(User, allocator, cbor_user_bytes);
+    defer cbor_user_result.deinit();
+
+    try std.testing.expectEqual(cbor_user_result.value.id, 10);
+    try std.testing.expectEqualSlices(u8, cbor_user_result.value.email.data, "johndoe@example.com");
 }

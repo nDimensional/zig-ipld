@@ -3,12 +3,17 @@ const std = @import("std");
 const CID = @import("cid").CID;
 const multibase = @import("multibase");
 
-const Value = @import("ipld").Value;
+const ipld = @import("ipld");
+const Kind = ipld.Kind;
+const Value = ipld.Value;
 const List = Value.List;
 const Map = Value.Map;
 const Link = Value.Link;
 const String = Value.String;
 const Bytes = Value.Bytes;
+
+const utils = @import("utils");
+const getRepresentation = utils.getRepresentation;
 
 /// For sorting static struct fields
 /// dag-json sorts them in ordinary lexicographic order.
@@ -166,20 +171,6 @@ pub const Decoder = struct {
         if (T == Value)
             return try self.readValueNext(allocator, reader);
 
-        if (T == String) {
-            const str = try self.copyString(reader);
-            return try String.create(allocator, str);
-        }
-
-        // if (T == Bytes)
-        //     return try writeBytes(writer, value.data);
-
-        // if (T == Link)
-        //     return try writeLink(writer, value.cid);
-
-        // if (T == CID)
-        //     return try writeLink(writer, value);
-
         if (T == CID) {
             try pop(reader, .object_begin);
             try self.expectString(reader, "/");
@@ -226,7 +217,7 @@ pub const Decoder = struct {
                 return try std.fmt.parseFloat(T, str);
             },
             .Enum => |info| {
-                const kind = comptime getRepresentation(T, info.decls) orelse Value.Kind.integer;
+                const kind = comptime getRepresentation(T, info.decls) orelse Kind.integer;
                 switch (kind) {
                     .integer => {
                         const value = try self.readTypeNext(info.tag_type, allocator, reader);
@@ -246,7 +237,7 @@ pub const Decoder = struct {
 
                         return error.InvalidValue;
                     },
-                    else => @compileError("Enum representations must be Value.Kind.integer or Value.Kind.string"),
+                    else => @compileError("Enum representations must be ipld.Kind.integer or ipld.Kind.string"),
                 }
             },
             .Array => |info| {
@@ -299,7 +290,7 @@ pub const Decoder = struct {
                             else => @compileError("T.decodeIpldInteger must be a function"),
                         };
 
-                        switch (@typeInfo(func_info.return_type)) {
+                        switch (@typeInfo(func_info.return_type orelse .NoReturn)) {
                             .ErrorUnion => |error_union_info| if (error_union_info.payload != T)
                                 @compileError("T.decodeIpldInteger must be a function returning an error union of T"),
                             else => @compileError("T.decodeIpldInteger must be a function returning an error union of T"),
@@ -316,35 +307,39 @@ pub const Decoder = struct {
 
                         const int_value = try self.readTypeNext(Int, allocator, reader);
                         return try T.decodeIpldInteger(int_value);
-                    } else if (comptime std.mem.eql(u8, decl.name, "decodeIpldString")) {
-                        const func_info = switch (@typeInfo(@TypeOf(T.decodeIpldString))) {
+                    } else if (comptime std.mem.eql(u8, decl.name, "parseIpldString")) {
+                        const func_info = switch (@typeInfo(@TypeOf(T.parseIpldString))) {
                             .Fn => |func_info| func_info,
-                            else => @compileError("T.decodeIpldString must be a function"),
+                            else => @compileError("T.parseIpldString must be a function"),
                         };
 
-                        switch (@typeInfo(func_info.return_type)) {
-                            .ErrorUnion => |error_union_info| if (error_union_info.payload != T)
-                                @compileError("T.decodeIpldString must be a function returning an error union of T"),
-                            else => @compileError("T.decodeIpldString must be a function returning an error union of T"),
-                        }
+                        const error_payload = switch (@typeInfo(func_info.return_type orelse .NoReturn)) {
+                            .ErrorUnion => |error_union_info| error_union_info.payload,
+                            else => .NoReturn,
+                        };
+
+                        if (error_payload != T)
+                            @compileError("T.parseIpldString must be a function returning an error union of T");
 
                         const str = try self.copyString(reader);
-                        return try T.decodeIpldString(allocator, str);
-                    } else if (comptime std.mem.eql(u8, decl.name, "decodeIpldBytes")) {
-                        const func_info = switch (@typeInfo(@TypeOf(T.decodeIpldString))) {
+                        return try T.parseIpldString(allocator, str);
+                    } else if (comptime std.mem.eql(u8, decl.name, "parseIpldBytes")) {
+                        const func_info = switch (@typeInfo(@TypeOf(T.parseIpldBytes))) {
                             .Fn => |func_info| func_info,
-                            else => @compileError("T.decodeIpldBytes must be a function"),
+                            else => @compileError("T.parseIpldBytes must be a function"),
                         };
 
-                        switch (@typeInfo(func_info.return_type)) {
-                            .ErrorUnion => |error_union_info| if (error_union_info.payload != T)
-                                @compileError("T.decodeIpldBytes must be a function returning an error union of T"),
-                            else => @compileError("T.decodeIpldBytes must be a function returning an error union of T"),
-                        }
+                        const error_payload = switch (@typeInfo(func_info.return_type orelse .NoReturn)) {
+                            .ErrorUnion => |error_union_info| error_union_info.payload,
+                            else => .NoReturn,
+                        };
+
+                        if (error_payload != T)
+                            @compileError("T.parseIpldBytes must be a function returning an error union of T");
 
                         const bytes = try decodeBytes(self.allocator, reader);
                         defer self.allocator.free(bytes);
-                        return try T.decodeIpldBytes(allocator, bytes);
+                        return try T.parseIpldBytes(allocator, bytes);
                     }
                 }
 
@@ -648,16 +643,19 @@ pub const Encoder = struct {
 
     options: Options,
     buffer: std.ArrayList(u8),
+    string_buffer: std.ArrayList(u8),
 
     pub fn init(allocator: std.mem.Allocator, options: Options) Encoder {
         return .{
             .options = options,
             .buffer = std.ArrayList(u8).init(allocator),
+            .string_buffer = std.ArrayList(u8).init(allocator),
         };
     }
 
     pub fn deinit(self: *Encoder) void {
         self.buffer.deinit();
+        self.string_buffer.deinit();
     }
 
     pub fn encodeType(self: *Encoder, T: type, allocator: std.mem.Allocator, value: T) ![]const u8 {
@@ -672,15 +670,6 @@ pub const Encoder = struct {
     pub fn writeType(self: *Encoder, comptime T: type, value: T, writer: std.io.AnyWriter) !void {
         if (T == Value)
             return try self.writeValue(value, writer);
-
-        if (T == String)
-            return try writeString(writer, value.data);
-
-        if (T == Bytes)
-            return try writeBytes(writer, value.data);
-
-        if (T == Link)
-            return try writeLink(writer, value.cid);
 
         if (T == CID)
             return try writeLink(writer, value);
@@ -700,11 +689,11 @@ pub const Encoder = struct {
             .Int => try std.fmt.format(writer, "{d}", .{value}),
             .Float => try self.writeFloat(writer, @floatCast(value)),
             .Enum => |info| {
-                const kind = comptime getRepresentation(T, info.decls) orelse Value.Kind.integer;
+                const kind = comptime getRepresentation(T, info.decls) orelse Kind.integer;
                 switch (kind) {
                     .integer => try self.writeType(info.tag_type, @intFromEnum(value), writer),
                     .string => try writeString(writer, @tagName(value)),
-                    else => @compileError("Enum representations must be Value.Kind.integer or Value.Kind.string"),
+                    else => @compileError("Enum representations must be ipld.Kind.integer or ipld.Kind.string"),
                 }
             },
             .Array => |info| {
@@ -733,7 +722,7 @@ pub const Encoder = struct {
                 inline for (info.decls) |decl| {
                     if (comptime std.mem.eql(u8, decl.name, "encodeIpldInteger")) {
                         const return_type = switch (@typeInfo(@TypeOf(T.encodeIpldInteger))) {
-                            .Fn => |func_info| func_info.return_type,
+                            .Fn => |func_info| func_info.return_type orelse .NoReturn,
                             else => @compileError("T.encodeIpldInteger must be a function"),
                         };
 
@@ -755,7 +744,7 @@ pub const Encoder = struct {
                             else => @compileError("T.writeIpldString must be a function"),
                         };
 
-                        const return_payload = switch (@typeInfo(func_info.return_type)) {
+                        const return_payload = switch (@typeInfo(func_info.return_type orelse .NoReturn)) {
                             .ErrorUnion => |error_union_info| error_union_info.payload,
                             else => @compileError("T.writeIpldString must return a void error union"),
                         };
@@ -775,7 +764,7 @@ pub const Encoder = struct {
                             else => @compileError("T.writeIpldBytes must be a function"),
                         };
 
-                        const return_payload = switch (@typeInfo(func_info.return_type)) {
+                        const return_payload = switch (@typeInfo(func_info.return_type orelse .NoReturn)) {
                             .ErrorUnion => |error_union_info| error_union_info.payload,
                             else => @compileError("T.writeIpldBytes must return a void error union"),
                         };
@@ -786,7 +775,7 @@ pub const Encoder = struct {
                         }
 
                         self.string_buffer.clearRetainingCapacity();
-                        try value.writeIpldBytes(self.string_buffer.writer().any());
+                        try T.writeIpldBytes(value, self.string_buffer.writer().any());
                         try writeBytes(writer, self.string_buffer.items);
                         return;
                     }
@@ -935,16 +924,3 @@ pub const Encoder = struct {
         );
     }
 };
-
-fn getRepresentation(comptime T: type, comptime decls: []const std.builtin.Type.Declaration) ?Value.Kind {
-    inline for (decls) |decl| {
-        if (comptime std.mem.eql(u8, decl.name, "IpldKind")) {
-            if (@TypeOf(T.IpldKind) != Value.Kind)
-                @compileError("expcted declaration T.IpldKind to be a Value.Kind");
-
-            return T.IpldKind;
-        }
-    }
-
-    return null;
-}

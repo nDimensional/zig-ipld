@@ -11,7 +11,10 @@ pub fn build(b: *std.Build) void {
     const multibase = multiformats.module("multibase");
     const cid = multiformats.module("cid");
 
-    // Modules
+    const multiformat_modules = multiformats.builder.modules;
+    for (multiformat_modules.keys(), multiformat_modules.values()) |name, module| {
+        b.modules.put(b.dupe(name), module) catch @panic("OOM");
+    }
 
     const ipld = b.addModule("ipld", .{
         .root_source_file = b.path("src/lib.zig"),
@@ -21,11 +24,20 @@ pub fn build(b: *std.Build) void {
         },
     });
 
+    // Shared utilities for dag-cbor and dag-json
+    const utils = b.createModule(.{
+        .root_source_file = b.path("src/utils.zig"),
+        .imports = &.{
+            .{ .name = "ipld", .module = ipld },
+        },
+    });
+
     const dag_cbor = b.addModule("dag-cbor", .{
         .root_source_file = b.path("src/dag_cbor.zig"),
         .imports = &.{
             .{ .name = "cid", .module = cid },
             .{ .name = "ipld", .module = ipld },
+            .{ .name = "utils", .module = utils },
         },
     });
 
@@ -35,6 +47,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "multibase", .module = multibase },
             .{ .name = "cid", .module = cid },
             .{ .name = "ipld", .module = ipld },
+            .{ .name = "utils", .module = utils },
         },
     });
 

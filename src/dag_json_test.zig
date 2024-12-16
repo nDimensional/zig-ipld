@@ -1,6 +1,8 @@
 const std = @import("std");
 
-const Value = @import("ipld").Value;
+const ipld = @import("ipld");
+const Kind = ipld.Kind;
+const Value = ipld.Value;
 
 const json = @import("dag-json");
 const Header = json.Header;
@@ -271,7 +273,7 @@ test "encode and decode Enum as integer" {
 
     // allocate a struct
     const Status = enum(u8) {
-        pub const IpldKind = Value.Kind.integer;
+        pub const IpldKind = Kind.integer;
 
         Stopped = 0,
         Started = 1,
@@ -306,7 +308,7 @@ test "encode and decode Enum as string" {
     // encode/decode Enum as a string
     // allocate a struct
     const Status = enum(u8) {
-        pub const IpldKind = Value.Kind.string;
+        pub const IpldKind = Kind.string;
 
         Stopped = 0,
         Started = 1,

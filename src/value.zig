@@ -3,7 +3,7 @@ const std = @import("std");
 const multibase = @import("multibase");
 const CID = @import("cid").CID;
 
-const ValueKind = enum {
+pub const Kind = enum {
     null,
     boolean,
     integer,
@@ -15,8 +15,170 @@ const ValueKind = enum {
     link,
 };
 
-pub const Value = union(ValueKind) {
-    pub const Kind = ValueKind;
+pub const Value = union(Kind) {
+    pub const String = struct {
+        allocator: std.mem.Allocator,
+        refs: u32,
+        data: []const u8,
+
+        /// copies `data` using `allocator`
+        pub fn create(allocator: std.mem.Allocator, data: []const u8) !*String {
+            const data_copy = try allocator.alloc(u8, data.len);
+            @memcpy(data_copy, data);
+            errdefer allocator.free(data_copy);
+
+            const string = try allocator.create(String);
+            string.allocator = allocator;
+            string.refs = 1;
+            string.data = data_copy;
+            return string;
+        }
+
+        /// increment reference count
+        pub inline fn ref(self: *String) void {
+            self.refs += 1;
+        }
+
+        /// decrement reference count, freeing all data on self.refs == 0
+        pub fn unref(self: *String) void {
+            if (self.refs == 0) @panic("ref count already at zero");
+
+            self.refs -= 1;
+            if (self.refs == 0) {
+                self.allocator.free(self.data);
+                self.allocator.destroy(self);
+            }
+        }
+
+        pub inline fn eql(self: *const String, other: *const String) bool {
+            return std.mem.eql(u8, self.data, other.data);
+        }
+
+        pub inline fn expectEqual(actual: *const String, expected: *const String) error{TestExpectedEqual}!void {
+            try std.testing.expectEqualSlices(u8, actual.data, expected.data);
+        }
+    };
+
+    pub const Bytes = struct {
+        allocator: std.mem.Allocator,
+        refs: u32,
+        data: []const u8,
+
+        /// copies `data` using `allocator`
+        pub fn create(allocator: std.mem.Allocator, data: []const u8) !*Bytes {
+            const data_copy = try allocator.alloc(u8, data.len);
+            @memcpy(data_copy, data);
+            errdefer allocator.free(data_copy);
+
+            const bytes = try allocator.create(Bytes);
+            bytes.allocator = allocator;
+            bytes.refs = 1;
+            bytes.data = data_copy;
+            return bytes;
+        }
+
+        /// decodes base-prefixed `str` using `base` and `allocator`
+        pub fn baseDecode(allocator: std.mem.Allocator, str: []const u8, base: multibase.Base) !*Bytes {
+            const data_copy = try base.baseDecode(allocator, str);
+            errdefer allocator.free(data_copy);
+
+            const bytes = try allocator.create(Bytes);
+            bytes.allocator = allocator;
+            bytes.refs = 1;
+            bytes.data = data_copy;
+            return bytes;
+        }
+
+        /// increment reference count
+        pub inline fn ref(self: *Bytes) void {
+            self.refs += 1;
+        }
+
+        /// decrement reference count, freeing all data on self.refs == 0
+        pub fn unref(self: *Bytes) void {
+            if (self.refs == 0) @panic("ref count already at zero");
+
+            self.refs -= 1;
+            if (self.refs == 0) {
+                self.allocator.free(self.data);
+                self.allocator.destroy(self);
+            }
+        }
+
+        pub inline fn eql(self: *const Bytes, other: *const Bytes) bool {
+            return std.mem.eql(u8, self.data, other.data);
+        }
+
+        pub inline fn expectEqual(actual: *const Bytes, expected: *const Bytes) error{TestExpectedEqual}!void {
+            try std.testing.expectEqualSlices(u8, actual.data, expected.data);
+        }
+    };
+
+    pub const Link = struct {
+        allocator: std.mem.Allocator,
+        refs: u32,
+        cid: CID,
+
+        /// copies `cid` using `allocator`
+        pub fn create(allocator: std.mem.Allocator, cid: CID) !*Link {
+            const cid_copy = try cid.copy(allocator);
+            errdefer cid_copy.deinit(allocator);
+
+            const link = try allocator.create(Link);
+            link.allocator = allocator;
+            link.refs = 1;
+            link.cid = cid_copy;
+            return link;
+        }
+
+        /// parse a new CID from `str` using `allocator`
+        pub fn parse(allocator: std.mem.Allocator, str: []const u8) !*Link {
+            const cid = try CID.parse(allocator, str);
+            errdefer cid.deinit(allocator);
+
+            const link = try allocator.create(Link);
+            link.allocator = allocator;
+            link.refs = 1;
+            link.cid = cid;
+            return link;
+        }
+
+        /// decode a new CID from `bytes` using `allocator`
+        pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) !*Link {
+            const cid = try CID.decode(allocator, bytes);
+            errdefer cid.deinit(allocator);
+
+            const link = try allocator.create(Link);
+            link.allocator = allocator;
+            link.refs = 1;
+            link.cid = cid;
+            return link;
+        }
+
+        /// increment reference count
+        pub inline fn ref(self: *Link) void {
+            self.refs += 1;
+        }
+
+        /// decrement reference count, freeing all data on self.refs == 0
+        pub fn unref(self: *Link) void {
+            if (self.refs == 0) @panic("ref count already at zero");
+
+            self.refs -= 1;
+            if (self.refs == 0) {
+                self.cid.deinit(self.allocator);
+                self.allocator.destroy(self);
+            }
+        }
+
+        pub inline fn eql(self: *const Link, other: *const Link) bool {
+            return self.cid.eql(other.cid);
+        }
+
+        pub inline fn expectEqual(actual: *const Link, expected: *const Link) error{TestExpectedEqual}!void {
+            try actual.cid.expectEqual(expected.cid);
+        }
+    };
 
     pub const List = struct {
         allocator: std.mem.Allocator,
@@ -232,170 +394,6 @@ pub const Value = union(ValueKind) {
 
         pub inline fn sort(self: *Map, sort_ctx: anytype) void {
             self.hash_map.sortUnstable(sort_ctx);
-        }
-    };
-
-    pub const String = struct {
-        allocator: std.mem.Allocator,
-        refs: u32,
-        data: []const u8,
-
-        /// copies `data` using `allocator`
-        pub fn create(allocator: std.mem.Allocator, data: []const u8) !*String {
-            const data_copy = try allocator.alloc(u8, data.len);
-            @memcpy(data_copy, data);
-            errdefer allocator.free(data_copy);
-
-            const string = try allocator.create(String);
-            string.allocator = allocator;
-            string.refs = 1;
-            string.data = data_copy;
-            return string;
-        }
-
-        /// increment reference count
-        pub inline fn ref(self: *String) void {
-            self.refs += 1;
-        }
-
-        /// decrement reference count, freeing all data on self.refs == 0
-        pub fn unref(self: *String) void {
-            if (self.refs == 0) @panic("ref count already at zero");
-
-            self.refs -= 1;
-            if (self.refs == 0) {
-                self.allocator.free(self.data);
-                self.allocator.destroy(self);
-            }
-        }
-
-        pub inline fn eql(self: *const String, other: *const String) bool {
-            return std.mem.eql(u8, self.data, other.data);
-        }
-
-        pub inline fn expectEqual(actual: *const String, expected: *const String) error{TestExpectedEqual}!void {
-            try std.testing.expectEqualSlices(u8, actual.data, expected.data);
-        }
-    };
-
-    pub const Bytes = struct {
-        allocator: std.mem.Allocator,
-        refs: u32,
-        data: []const u8,
-
-        /// copies `data` using `allocator`
-        pub fn create(allocator: std.mem.Allocator, data: []const u8) !*Bytes {
-            const data_copy = try allocator.alloc(u8, data.len);
-            @memcpy(data_copy, data);
-            errdefer allocator.free(data_copy);
-
-            const bytes = try allocator.create(Bytes);
-            bytes.allocator = allocator;
-            bytes.refs = 1;
-            bytes.data = data_copy;
-            return bytes;
-        }
-
-        /// decodes base-prefixed `str` using `base` and `allocator`
-        pub fn baseDecode(allocator: std.mem.Allocator, str: []const u8, base: multibase.Base) !*Bytes {
-            const data_copy = try base.baseDecode(allocator, str);
-            errdefer allocator.free(data_copy);
-
-            const bytes = try allocator.create(Bytes);
-            bytes.allocator = allocator;
-            bytes.refs = 1;
-            bytes.data = data_copy;
-            return bytes;
-        }
-
-        /// increment reference count
-        pub inline fn ref(self: *Bytes) void {
-            self.refs += 1;
-        }
-
-        /// decrement reference count, freeing all data on self.refs == 0
-        pub fn unref(self: *Bytes) void {
-            if (self.refs == 0) @panic("ref count already at zero");
-
-            self.refs -= 1;
-            if (self.refs == 0) {
-                self.allocator.free(self.data);
-                self.allocator.destroy(self);
-            }
-        }
-
-        pub inline fn eql(self: *const Bytes, other: *const Bytes) bool {
-            return std.mem.eql(u8, self.data, other.data);
-        }
-
-        pub inline fn expectEqual(actual: *const Bytes, expected: *const Bytes) error{TestExpectedEqual}!void {
-            try std.testing.expectEqualSlices(u8, actual.data, expected.data);
-        }
-    };
-
-    pub const Link = struct {
-        allocator: std.mem.Allocator,
-        refs: u32,
-        cid: CID,
-
-        /// copies `cid` using `allocator`
-        pub fn create(allocator: std.mem.Allocator, cid: CID) !*Link {
-            const cid_copy = try cid.copy(allocator);
-            errdefer cid_copy.deinit(allocator);
-
-            const link = try allocator.create(Link);
-            link.allocator = allocator;
-            link.refs = 1;
-            link.cid = cid_copy;
-            return link;
-        }
-
-        /// parse a new CID from `str` using `allocator`
-        pub fn parse(allocator: std.mem.Allocator, str: []const u8) !*Link {
-            const cid = try CID.parse(allocator, str);
-            errdefer cid.deinit(allocator);
-
-            const link = try allocator.create(Link);
-            link.allocator = allocator;
-            link.refs = 1;
-            link.cid = cid;
-            return link;
-        }
-
-        /// decode a new CID from `bytes` using `allocator`
-        pub fn decode(allocator: std.mem.Allocator, bytes: []const u8) !*Link {
-            const cid = try CID.decode(allocator, bytes);
-            errdefer cid.deinit(allocator);
-
-            const link = try allocator.create(Link);
-            link.allocator = allocator;
-            link.refs = 1;
-            link.cid = cid;
-            return link;
-        }
-
-        /// increment reference count
-        pub inline fn ref(self: *Link) void {
-            self.refs += 1;
-        }
-
-        /// decrement reference count, freeing all data on self.refs == 0
-        pub fn unref(self: *Link) void {
-            if (self.refs == 0) @panic("ref count already at zero");
-
-            self.refs -= 1;
-            if (self.refs == 0) {
-                self.cid.deinit(self.allocator);
-                self.allocator.destroy(self);
-            }
-        }
-
-        pub inline fn eql(self: *const Link, other: *const Link) bool {
-            return self.cid.eql(other.cid);
-        }
-
-        pub inline fn expectEqual(actual: *const Link, expected: *const Link) error{TestExpectedEqual}!void {
-            try actual.cid.expectEqual(expected.cid);
         }
     };
 
