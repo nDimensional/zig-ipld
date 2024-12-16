@@ -1,6 +1,6 @@
 # zig-ipld
 
-Zig implementation of the IPLD data model, with dag-cbor and dag-json codecs.
+Zig implementation of the [IPLD](https://ipld.io/) data model, with dag-cbor and dag-json codecs.
 
 Provides two parallel APIs:
 
