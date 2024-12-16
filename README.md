@@ -13,9 +13,11 @@ Passes all tests in [ipld/codec-fixtures](https://github.com/ipld/codec-fixtures
 
 - [Install](#install)
 - [Usage](#usage)
-  - [Dynamic values](#dynamic-values)
+  - [Creating dynamic values](#creating-dynamic-values)
   - [Encoding dynamic values](#encoding-dynamic-values)
+  - [Decoding dynamic values](#encoding-dynamic-values)
   - [Static types](#static-types)
+  - [Strings and bytes](#strings-and-bytes)
 
 ## Install
 
@@ -43,18 +45,27 @@ pub fn build(b: *std.Build) !void {
     const json = ipld_dep.module("dag-json");
     const cbor = ipld_dep.module("dag-cbor");
 
-    // ... add as imports to exe or lib
+    // All of the modules from zig-multiformats are also re-exported
+    // from zig-ipld, for convenience and to ensure consistent versions.
+    const varint = ipld_dep.module("varint");
+    const multibase = ipld_dep.module("multibase");
+    const multihash = ipld_dep.module("multihash");
+    const cid = ipld_dep.module("cid");
+
+    // add as imports to your exe or lib...
 }
 ```
 
 ## Usage
 
-### Dynamic Values
+### Creating dynamic Values
 
 ```zig
-const Value = @import("ipld").Value;
+const ipld = @import("ipld");
+const Kind = ipld.Kind;
+const Value = ipld.Value;
 
-// Value is a union over ipld.Kind: enum {
+// ipld.Value is a union over ipld.Kind: enum {
 //   null, boolean, integer, float, string, bytes, list, map, link
 // }
 
@@ -113,7 +124,70 @@ pub fn main() !void {
 
 ### Encoding dynamic values
 
-`dag-cbor` and `dag-json` both export interface-compatible `Encoder` and `Decoder` structs. See [example.zig](./example.zig) for usage.
+`dag-cbor` and `dag-json` both export `Encoder` structs with identical APIs. Here's an example with a dag-json encoder:
+
+```zig
+const std = @import("std");
+const ipld = @import("ipld");
+const Value = ipld.Value;
+
+test "encode a dynamic value" {
+    const allocator = std.heap.c_allocator;
+    const example_value = try Value.createList(allocator, .{
+        try Value.createList(allocator, .{}),
+        try Value.createList(allocator, .{
+            Value.Null,
+            Value.integer(42),
+            Value.True,
+        }),
+    });
+
+    var encoder = json.Encoder.init(allocator, .{});
+    defer encoder.deinit();
+
+    const bytes = try encoder.encodeValue(allocator, example_value);
+    defer allocator.free(bytes);
+
+    try std.testing.expectEqualSlices(u8, "[[],[null,42,true]]", json_bytes);
+}
+```
+
+The encoders must be initialized with an allocator, which is used for internal encoder state. Each `encodeValue` call takes its own allocator that it **only** uses for allocating the resulting `[]const u8` slice.
+
+### Decoding dynamic values
+
+`dag-cbor` and `dag-json` both export `Decoder` structs with identical APIs.
+
+Here's an example with a dag-json decoder:
+
+```zig
+const std = @import("std");
+const ipld = @import("ipld");
+const Value = ipld.Value;
+
+test "decode a dynamic value" {
+    const allocator = std.heap.c_allocator;
+
+    var decoder = json.Decoder.init(allocator, .{});
+    defer decoder.deinit();
+
+    const value = try decoder.decodeValue(allocator, "[[],[null,42,true]]");
+    defer value.unref();
+
+    const expected_value = try Value.createList(allocator, .{
+        try Value.createList(allocator, .{}),
+        try Value.createList(allocator, .{
+            Value.Null,
+            Value.integer(42),
+            Value.True,
+        }),
+    });
+    defer expected_value.unref();
+
+    try value.exepctEqual(expected_value);
+```
+
+The decoders must be initialized with an allocator, which is used for internal encoder state. Each `decodeValue` call takes its own allocator that it uses for creating the actual Value elements, which does not have to be the same allocator used internally by the encoder.
 
 ### Static Types
 
@@ -140,7 +214,7 @@ const json = @import("dag-json");
 
 const Foo = struct { abc: u32, xyz: bool };
 
-{
+test "encode a static type" {
     var encoder = json.Encoder.init(allocator, .{});
     defer encoder.deinit();
 
@@ -163,7 +237,7 @@ const json = @import("dag-json");
 const Foo = struct { abc: u32, xyz: *const Bar };
 const Bar = struct { id: u32, children: []const u32 };
 
-{
+test "decode nested static types" {
     var decoder = json.Decoder.init(allocator, .{});
     defer decoder.deinit();
 
@@ -200,7 +274,7 @@ const User = struct {
     email: ipld.String,
 };
 
-test "encode static User type" {
+test "encode static User" {
     var encoder = json.Encoder.init(allocator, .{});
     defer encoder.deinit();
 
@@ -215,7 +289,7 @@ test "encode static User type" {
     );
 }
 
-test "decode static User type" {
+test "decode static User" {
     var decoder = json.Decoder.init(allocator, .{});
     defer decoder.deinit();
 
