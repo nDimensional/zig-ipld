@@ -239,16 +239,16 @@ pub const Decoder = struct {
         }
 
         switch (@typeInfo(T)) {
-            .Optional => |info| {
+            .optional => |info| {
                 if (header.isSimpleValue(.Null)) return null;
                 return try self.readTypeFromHeader(info.child, allocator, reader, header);
             },
-            .Bool => {
+            .bool => {
                 if (header.isSimpleValue(.False)) return false;
                 if (header.isSimpleValue(.True)) return true;
                 return error.InvalidType;
             },
-            .Int => |info| {
+            .int => |info| {
                 if (info.bits > 64) @compileError("cannot decode integer types of more than 64 bits");
 
                 const min = std.math.minInt(T);
@@ -274,12 +274,12 @@ pub const Decoder = struct {
                     },
                 }
             },
-            .Float => {
+            .float => {
                 try header.expectType(.SimpleOrFloat);
                 const value = try self.readArgumentFloat(header, reader);
                 return @floatCast(value);
             },
-            .Enum => |info| {
+            .@"enum" => |info| {
                 const kind = comptime getRepresentation(T, info.decls) orelse Kind.integer;
                 switch (kind) {
                     .integer => {
@@ -306,7 +306,7 @@ pub const Decoder = struct {
                     else => @compileError("Enum representations must be Value.Kind.integer or Value.Kind.string"),
                 }
             },
-            .Array => |info| {
+            .array => |info| {
                 if (info.sentinel != null) @compileError("array sentinels are not supported");
                 try header.expectType(.Array);
 
@@ -319,16 +319,16 @@ pub const Decoder = struct {
 
                 return result;
             },
-            .Pointer => |info| switch (info.size) {
-                .One => {
-                    if (info.sentinel != null) @compileError("pointer sentinels are not supported");
+            .pointer => |info| switch (info.size) {
+                .one => {
+                    if (info.sentinel_ptr != null) @compileError("pointer sentinels are not supported");
                     const item = try allocator.create(info.child);
                     errdefer allocator.destroy(item);
                     item.* = try self.readTypeFromHeader(info.child, allocator, reader, header);
                     return item;
                 },
-                .Slice => {
-                    if (info.sentinel != null) @compileError("pointer sentinels are not supported");
+                .slice => {
+                    if (info.sentinel_ptr != null) @compileError("pointer sentinels are not supported");
                     const len = try self.readArgumentInt(header, reader);
                     const items = try allocator.alloc(info.child, len);
                     errdefer allocator.free(items);
@@ -336,14 +336,14 @@ pub const Decoder = struct {
                     for (items) |*item| item.* = try self.readTypeAlloc(info.child, allocator, reader);
                     return items;
                 },
-                .Many => @compileError("cannot generate IPLD decoder for [*]T pointers"),
-                .C => @compileError("cannot generate IPLD decoder for [*c]T pointers"),
+                .many => @compileError("cannot generate IPLD decoder for [*]T pointers"),
+                .c => @compileError("cannot generate IPLD decoder for [*c]T pointers"),
             },
-            .Struct => |info| {
+            .@"struct" => |info| {
                 inline for (info.decls) |decl| {
                     if (comptime std.mem.eql(u8, decl.name, "decodeIpldInteger")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.decodeIpldInteger))) {
-                            .Fn => |func_info| func_info,
+                            .@"fn" => |func_info| func_info,
                             else => @compileError("T.decodeIpldInteger must be a function"),
                         };
 
@@ -358,7 +358,7 @@ pub const Decoder = struct {
 
                         const Int = func_info.params[0].type;
                         switch (@typeInfo(Int)) {
-                            .Int => {},
+                            .int => {},
                             else => @compileError("T.decodeIpldInteger must be a function of a single integer argument"),
                         }
 
@@ -366,7 +366,7 @@ pub const Decoder = struct {
                         return try T.decodeIpldInteger(int_value);
                     } else if (comptime std.mem.eql(u8, decl.name, "parseIpldString")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.parseIpldString))) {
-                            .Fn => |func_info| func_info,
+                            .@"fn" => |func_info| func_info,
                             else => @compileError("T.parseIpldString must be a function"),
                         };
 
@@ -383,7 +383,7 @@ pub const Decoder = struct {
                         return try T.parseIpldString(allocator, self.buffer.items);
                     } else if (comptime std.mem.eql(u8, decl.name, "parseIpldBytes")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.parseIpldBytes))) {
-                            .Fn => |func_info| func_info,
+                            .@"fn" => |func_info| func_info,
                             else => @compileError("T.parseIpldBytes must be a function"),
                         };
 
@@ -473,13 +473,13 @@ pub const Decoder = struct {
                 const max = comptime std.math.maxInt(i64);
                 const value = try self.readArgumentInt(header, reader);
                 if (value > max) return error.Overflow;
-                return Value.integer(@intCast(value));
+                return Value.createInteger(@intCast(value));
             },
             .NegativeInteger => {
                 const max = comptime (1 << 63) - 1;
                 const value = try self.readArgumentInt(header, reader);
                 if (value > max) return error.Overflow;
-                return Value.integer(-1 - @as(i64, @intCast(value)));
+                return Value.createInteger(-1 - @as(i64, @intCast(value)));
             },
             .ByteString => {
                 const len = try self.readArgumentInt(header, reader);
@@ -540,7 +540,7 @@ pub const Decoder = struct {
                 if (header.isSimpleValue(.Null)) return Value.Null;
 
                 const value = try self.readArgumentFloat(header, reader);
-                return Value.float(value);
+                return Value.createFloat(value);
             },
         }
     }
@@ -646,18 +646,18 @@ pub const Encoder = struct {
             return try self.writeLink(value, writer);
 
         switch (@typeInfo(T)) {
-            .Optional => |info| {
+            .optional => |info| {
                 if (value) |child_value| {
                     try self.writeType(info.child, child_value, writer);
                 } else {
                     try writer.writeByte(Header.fromSimpleValue(.Null).encode());
                 }
             },
-            .Bool => switch (value) {
+            .bool => switch (value) {
                 false => try writer.writeByte(Header.fromSimpleValue(.False).encode()),
                 true => try writer.writeByte(Header.fromSimpleValue(.True).encode()),
             },
-            .Int => |info| {
+            .int => |info| {
                 if (info.bits > 64) @compileError("cannot encode integer types of more than 64 bits");
                 if (0 <= value) {
                     try self.writeArgumentInt(.UnsignedInteger, @intCast(value), writer);
@@ -665,10 +665,10 @@ pub const Encoder = struct {
                     try self.writeArgumentInt(.NegativeInteger, @intCast(-(value + 1)), writer);
                 }
             },
-            .Float => {
+            .float => {
                 try self.writeArgumentFloat(.SimpleOrFloat, @floatCast(value), writer);
             },
-            .Enum => |info| {
+            .@"enum" => |info| {
                 const kind = comptime getRepresentation(T, info.decls) orelse Value.Kind.integer;
                 switch (kind) {
                     .integer => try self.writeType(info.tag_type, @intFromEnum(value), writer),
@@ -680,25 +680,25 @@ pub const Encoder = struct {
                     else => @compileError("Enum representations must be Value.Kind.integer or Value.Kind.string"),
                 }
             },
-            .Array => |info| {
-                if (info.sentinel != null) @compileError("array sentinels are not supported");
+            .array => |info| {
+                if (info.sentinel_ptr != null) @compileError("array sentinels are not supported");
                 try self.writeArgumentInt(.Array, info.len, writer);
                 for (value) |item| {
                     try self.writeType(info.child, item, writer);
                 }
             },
-            .Pointer => |info| switch (info.size) {
-                .One => try self.writeType(info.child, value.*, writer),
-                .Slice => {
+            .pointer => |info| switch (info.size) {
+                .one => try self.writeType(info.child, value.*, writer),
+                .slice => {
                     try self.writeArgumentInt(.Array, value.len, writer);
                     for (value) |item| {
                         try self.writeType(info.child, item, writer);
                     }
                 },
-                .Many => @compileError("cannot generate IPLD encoder for [*]T pointers"),
-                .C => @compileError("cannot generate IPLD encoder for [*c]T pointers"),
+                .many => @compileError("cannot generate IPLD encoder for [*]T pointers"),
+                .c => @compileError("cannot generate IPLD encoder for [*c]T pointers"),
             },
-            .Struct => |info| {
+            .@"struct" => |info| {
                 inline for (info.decls) |decl| {
                     if (comptime std.mem.eql(u8, decl.name, "encodeIpldInteger")) {
                         const return_type = switch (@typeInfo(@TypeOf(T.encodeIpldInteger))) {
@@ -712,7 +712,7 @@ pub const Encoder = struct {
                         };
 
                         switch (@typeInfo(return_payload)) {
-                            .Int => {},
+                            .int => {},
                             else => @compileError("T.encodeIpldInteger must return an error union of an integer type"),
                         }
 
@@ -720,7 +720,7 @@ pub const Encoder = struct {
                         return try self.writeType(return_payload, value_int, writer);
                     } else if (comptime std.mem.eql(u8, decl.name, "writeIpldString")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.writeIpldString))) {
-                            .Fn => |func_info| func_info,
+                            .@"fn" => |func_info| func_info,
                             else => @compileError("T.writeIpldString must be a function"),
                         };
 
@@ -742,7 +742,7 @@ pub const Encoder = struct {
                         return;
                     } else if (comptime std.mem.eql(u8, decl.name, "writeIpldBytes")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.writeIpldBytes))) {
-                            .Fn => |func_info| func_info,
+                            .@"fn" => |func_info| func_info,
                             else => @compileError("T.writeIpldBytes must be a function"),
                         };
 
@@ -752,7 +752,7 @@ pub const Encoder = struct {
                         };
 
                         switch (@typeInfo(return_payload)) {
-                            .Void => {},
+                            .void => {},
                             else => @compileError("T.writeIpldBytes must return a void error union"),
                         }
 

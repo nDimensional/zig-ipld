@@ -242,28 +242,28 @@ test "dynamic value fixture" {
         .{ .value = Value.True, .bytes = &.{(7 << 5) | 21} },
         .{ .value = Value.Null, .bytes = &.{(7 << 5) | 22} },
 
-        .{ .value = Value.integer(0), .bytes = &.{(0 << 5) | 0} },
-        .{ .value = Value.integer(1), .bytes = &.{(0 << 5) | 1} },
-        .{ .value = Value.integer(23), .bytes = &.{(0 << 5) | 23} },
-        .{ .value = Value.integer(24), .bytes = &.{ (0 << 5) | 24, 24 } },
-        .{ .value = Value.integer(0xff), .bytes = &.{ (0 << 5) | 24, 255 } },
-        .{ .value = Value.integer(0xffff), .bytes = &.{ (0 << 5) | 25, 255, 255 } },
-        .{ .value = Value.integer(0xffffff), .bytes = &.{ (0 << 5) | 26, 0, 255, 255, 255 } },
-        .{ .value = Value.integer(0xffffffff), .bytes = &.{ (0 << 5) | 26, 255, 255, 255, 255 } },
+        .{ .value = Value.createInteger(0), .bytes = &.{(0 << 5) | 0} },
+        .{ .value = Value.createInteger(1), .bytes = &.{(0 << 5) | 1} },
+        .{ .value = Value.createInteger(23), .bytes = &.{(0 << 5) | 23} },
+        .{ .value = Value.createInteger(24), .bytes = &.{ (0 << 5) | 24, 24 } },
+        .{ .value = Value.createInteger(0xff), .bytes = &.{ (0 << 5) | 24, 255 } },
+        .{ .value = Value.createInteger(0xffff), .bytes = &.{ (0 << 5) | 25, 255, 255 } },
+        .{ .value = Value.createInteger(0xffffff), .bytes = &.{ (0 << 5) | 26, 0, 255, 255, 255 } },
+        .{ .value = Value.createInteger(0xffffffff), .bytes = &.{ (0 << 5) | 26, 255, 255, 255, 255 } },
 
-        .{ .value = Value.integer(-10), .bytes = &.{ (1 << 5) | 9 } },
-        .{ .value = Value.integer(-100), .bytes = &.{ (1 << 5) | 24, 99 } },
-        .{ .value = Value.integer(-1000), .bytes = &.{ (1 << 5) | 25, 3, 231 } },
-        .{ .value = Value.integer(-10000), .bytes = &.{ (1 << 5) | 25, 39, 15 } },
-        .{ .value = Value.integer(-100000), .bytes = &.{ (1 << 5) | 26, 0, 1, 134, 159 } },
+        .{ .value = Value.createInteger(-10), .bytes = &.{ (1 << 5) | 9 } },
+        .{ .value = Value.createInteger(-100), .bytes = &.{ (1 << 5) | 24, 99 } },
+        .{ .value = Value.createInteger(-1000), .bytes = &.{ (1 << 5) | 25, 3, 231 } },
+        .{ .value = Value.createInteger(-10000), .bytes = &.{ (1 << 5) | 25, 39, 15 } },
+        .{ .value = Value.createInteger(-100000), .bytes = &.{ (1 << 5) | 26, 0, 1, 134, 159 } },
 
-        .{ .value = Value.integer(std.math.maxInt(i64)), .bytes = &.{ (0 << 5) | 27, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff } },
-        .{ .value = Value.integer(std.math.minInt(i64)), .bytes = &.{ (1 << 5) | 27, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff } },
+        .{ .value = Value.createInteger(std.math.maxInt(i64)), .bytes = &.{ (0 << 5) | 27, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff } },
+        .{ .value = Value.createInteger(std.math.minInt(i64)), .bytes = &.{ (1 << 5) | 27, 0x7f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff } },
 
-        .{ .value = Value.float(std.math.pi), .bytes = &.{ (7 << 5) | 27, 64, 9, 33, 251, 84, 68, 45, 24 } },
+        .{ .value = Value.createFloat(std.math.pi), .bytes = &.{ (7 << 5) | 27, 64, 9, 33, 251, 84, 68, 45, 24 } },
 
         .{
-            .value = try Value.createMap(allocator, .{ .foo = Value.integer(4) }),
+            .value = try Value.createMap(allocator, .{ .foo = Value.createInteger(4) }),
             .bytes = &.{
                 // zig fmt: off
                 (5 << 5) | 1,
@@ -273,7 +273,7 @@ test "dynamic value fixture" {
         },
 
         .{
-            .value = try Value.createMap(allocator, .{ .foo = Value.integer(4), .bar = Value.Null }),
+            .value = try Value.createMap(allocator, .{ .foo = Value.createInteger(4), .bar = Value.Null }),
             .bytes = &.{
                 // zig fmt: off
                 (5 << 5) | 2,
@@ -285,11 +285,11 @@ test "dynamic value fixture" {
 
         .{
             .value = try Value.createMap(allocator, .{
-                .foo = Value.integer(4),
+                .foo = Value.createInteger(4),
                 .bar = try Value.createList(allocator, .{
-                    Value.integer(0xffff),
-                    Value.integer(0xffffffff),
-                    Value.integer(0x7fffffffffffffff),
+                    Value.createInteger(0xffff),
+                    Value.createInteger(0xffffffff),
+                    Value.createInteger(0x7fffffffffffffff),
                 }),
             }),
             .bytes = &.{

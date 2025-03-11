@@ -190,7 +190,7 @@ pub const Value = union(Kind) {
             errdefer array_list.deinit(allocator);
 
             const tuple_info = switch (@typeInfo(@TypeOf(initial_values))) {
-                .Struct => |info| info,
+                .@"struct" => |info| info,
                 else => @compileError("initial_values must be a tuple"),
             };
 
@@ -287,7 +287,7 @@ pub const Value = union(Kind) {
             errdefer hash_map.deinit(allocator);
 
             const struct_info = switch (@typeInfo(@TypeOf(initial_entries))) {
-                .Struct => |info| info,
+                .@"struct" => |info| info,
                 else => @compileError("initial_entries must be a struct"),
             };
 
@@ -411,11 +411,11 @@ pub const Value = union(Kind) {
     pub const True = Value{ .boolean = true };
     pub const Null = Value{ .null = {} };
 
-    pub inline fn integer(value: i64) Value {
+    pub inline fn createInteger(value: i64) Value {
         return .{ .integer = value };
     }
 
-    pub inline fn float(value: f64) Value {
+    pub inline fn createFloat(value: f64) Value {
         return .{ .float = value };
     }
 
@@ -611,11 +611,11 @@ test "primitive values" {
 
     const max = std.math.maxInt(i64);
     const min = std.math.minInt(i64);
-    try std.testing.expectEqual(Value.integer(0).integer, 0);
-    try std.testing.expectEqual(Value.integer(min).integer, min);
-    try std.testing.expectEqual(Value.integer(max).integer, max);
+    try std.testing.expectEqual(Value.createInteger(0).integer, 0);
+    try std.testing.expectEqual(Value.createInteger(min).integer, min);
+    try std.testing.expectEqual(Value.createInteger(max).integer, max);
 
-    try std.testing.expectEqual(Value.float(std.math.pi).float, @as(f64, std.math.pi));
+    try std.testing.expectEqual(Value.createFloat(std.math.pi).float, @as(f64, std.math.pi));
 }
 
 test "complex values" {
@@ -625,7 +625,7 @@ test "complex values" {
 
     var map = try Value.createMap(allocator, .{
         .foo = try Value.createString(allocator, "hello world"),
-        .bar = Value.integer(9),
+        .bar = Value.createInteger(9),
         .baz = Value.True,
     });
 
@@ -633,14 +633,14 @@ test "complex values" {
 
     var list = try Value.createList(allocator, .{
         try Value.createString(allocator, "hello world"),
-        Value.integer(9),
+        Value.createInteger(9),
         Value.True,
         try Value.createMap(allocator, .{
             .foo = try Value.createString(allocator, "hello world"),
-            .bar = Value.integer(9),
+            .bar = Value.createInteger(9),
             .baz = try Value.createMap(allocator, .{
                 .foo = try Value.createString(allocator, "hello world"),
-                .bar = Value.integer(9),
+                .bar = Value.createInteger(9),
                 .baz = Value.True,
             }),
         }),

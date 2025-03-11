@@ -182,19 +182,19 @@ pub const Decoder = struct {
         }
 
         switch (@typeInfo(T)) {
-            .Optional => |info| switch (try reader.peekNextTokenType()) {
+            .optional => |info| switch (try reader.peekNextTokenType()) {
                 .null => switch (try reader.next()) {
                     .null => return null,
                     else => unreachable,
                 },
                 else => return try self.readTypeNext(info.child, allocator, reader),
             },
-            .Bool => switch (try reader.next()) {
+            .bool => switch (try reader.next()) {
                 .true => return true,
                 .false => return false,
                 else => return error.InvalidType,
             },
-            .Int => |info| {
+            .int => |info| {
                 if (info.bits > 64) @compileError("cannot decode integer types of more than 64 bits");
 
                 const min = std.math.minInt(T);
@@ -212,11 +212,11 @@ pub const Decoder = struct {
                     }
                 }
             },
-            .Float => {
+            .float => {
                 const str = try self.copyNumber(reader);
                 return try std.fmt.parseFloat(T, str);
             },
-            .Enum => |info| {
+            .@"enum" => |info| {
                 const kind = comptime getRepresentation(T, info.decls) orelse Kind.integer;
                 switch (kind) {
                     .integer => {
@@ -240,8 +240,8 @@ pub const Decoder = struct {
                     else => @compileError("Enum representations must be ipld.Kind.integer or ipld.Kind.string"),
                 }
             },
-            .Array => |info| {
-                if (info.sentinel != null) @compileError("array sentinels are not supported");
+            .array => |info| {
+                if (info.sentinel_ptr != null) @compileError("array sentinels are not supported");
 
                 try pop(reader, .array_begin);
 
@@ -253,15 +253,15 @@ pub const Decoder = struct {
 
                 return result;
             },
-            .Pointer => |info| switch (info.size) {
-                .One => {
-                    if (info.sentinel != null) @compileError("pointer sentinels are not supported");
+            .pointer => |info| switch (info.size) {
+                .one => {
+                    if (info.sentinel_ptr != null) @compileError("pointer sentinels are not supported");
                     const item = try allocator.create(info.child);
                     item.* = try self.readTypeNext(info.child, allocator, reader);
                     return item;
                 },
-                .Slice => {
-                    if (info.sentinel != null) @compileError("pointer sentinels are not supported");
+                .slice => {
+                    if (info.sentinel_ptr != null) @compileError("pointer sentinels are not supported");
                     try pop(reader, .array_begin);
 
                     var array = std.ArrayList(info.child).init(self.allocator);
@@ -279,10 +279,10 @@ pub const Decoder = struct {
 
                     return result;
                 },
-                .Many => @compileError("cannot generate IPLD decoder for [*]T pointers"),
-                .C => @compileError("cannot generate IPLD decoder for [*c]T pointers"),
+                .many => @compileError("cannot generate IPLD decoder for [*]T pointers"),
+                .c => @compileError("cannot generate IPLD decoder for [*c]T pointers"),
             },
-            .Struct => |info| {
+            .@"struct" => |info| {
                 inline for (info.decls) |decl| {
                     if (comptime std.mem.eql(u8, decl.name, "decodeIpldInteger")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.decodeIpldInteger))) {
@@ -301,7 +301,7 @@ pub const Decoder = struct {
 
                         const Int = func_info.params[0].type;
                         switch (@typeInfo(Int)) {
-                            .Int => {},
+                            .int => {},
                             else => @compileError("T.decodeIpldInteger must be a function of a single integer argument"),
                         }
 
@@ -309,7 +309,7 @@ pub const Decoder = struct {
                         return try T.decodeIpldInteger(int_value);
                     } else if (comptime std.mem.eql(u8, decl.name, "parseIpldString")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.parseIpldString))) {
-                            .Fn => |func_info| func_info,
+                            .@"fn" => |func_info| func_info,
                             else => @compileError("T.parseIpldString must be a function"),
                         };
 
@@ -441,10 +441,10 @@ pub const Decoder = struct {
                 const str = try self.copyNumber(reader);
                 if (std.mem.indexOfScalar(u8, str, '.') != null or std.mem.indexOfScalar(u8, str, 'e') != null) {
                     const value = try std.fmt.parseFloat(f64, str);
-                    return Value.float(value);
+                    return Value.createFloat(value);
                 } else {
                     const value = try std.fmt.parseInt(i64, str, 10);
-                    return Value.integer(value);
+                    return Value.createInteger(value);
                 }
             },
             else => switch (try reader.next()) {
@@ -617,13 +617,8 @@ pub const Decoder = struct {
 
 pub const Encoder = struct {
     pub const FloatFormat = union(enum) {
-        pub inline fn scientific() FloatFormat {
-            return .{ .scientific = {} };
-        }
-
-        pub inline fn decimal() FloatFormat {
-            return .{ .decimal = {} };
-        }
+        pub const Scientific = FloatFormat{ .scientific = {} };
+        pub const Decimal = FloatFormat{ .decimal = {} };
 
         pub inline fn decimalInRange(min_exp10: ?i10, max_exp10: ?i10) FloatFormat {
             return .{ .decimal_in_range = .{
@@ -638,7 +633,7 @@ pub const Encoder = struct {
     };
 
     pub const Options = struct {
-        float_format: FloatFormat = FloatFormat.decimal(),
+        float_format: FloatFormat = FloatFormat.Decimal,
     };
 
     options: Options,
@@ -675,20 +670,20 @@ pub const Encoder = struct {
             return try writeLink(writer, value);
 
         switch (@typeInfo(T)) {
-            .Optional => |info| {
+            .optional => |info| {
                 if (value) |child_value| {
                     try self.writeType(info.child, child_value, writer);
                 } else {
                     try writer.writeAll("null");
                 }
             },
-            .Bool => switch (value) {
+            .bool => switch (value) {
                 false => try writer.writeAll("false"),
                 true => try writer.writeAll("true"),
             },
-            .Int => try std.fmt.format(writer, "{d}", .{value}),
-            .Float => try self.writeFloat(writer, @floatCast(value)),
-            .Enum => |info| {
+            .int => try std.fmt.format(writer, "{d}", .{value}),
+            .float => try self.writeFloat(writer, @floatCast(value)),
+            .@"enum" => |info| {
                 const kind = comptime getRepresentation(T, info.decls) orelse Kind.integer;
                 switch (kind) {
                     .integer => try self.writeType(info.tag_type, @intFromEnum(value), writer),
@@ -696,8 +691,8 @@ pub const Encoder = struct {
                     else => @compileError("Enum representations must be ipld.Kind.integer or ipld.Kind.string"),
                 }
             },
-            .Array => |info| {
-                if (info.sentinel != null) @compileError("array sentinels are not supported");
+            .array => |info| {
+                if (info.sentinel_ptr != null) @compileError("array sentinels are not supported");
                 try writer.writeByte('[');
                 for (value, 0..) |item, i| {
                     if (i > 0) try writer.writeByte(',');
@@ -705,9 +700,9 @@ pub const Encoder = struct {
                 }
                 try writer.writeByte(']');
             },
-            .Pointer => |info| switch (info.size) {
-                .One => try self.writeType(info.child, value.*, writer),
-                .Slice => {
+            .pointer => |info| switch (info.size) {
+                .one => try self.writeType(info.child, value.*, writer),
+                .slice => {
                     try writer.writeByte('[');
                     for (value, 0..) |item, i| {
                         if (i > 0) try writer.writeByte(',');
@@ -715,10 +710,10 @@ pub const Encoder = struct {
                     }
                     try writer.writeByte(']');
                 },
-                .Many => @compileError("cannot generate IPLD encoder for [*]T pointers"),
-                .C => @compileError("cannot generate IPLD encoder for [*c]T pointers"),
+                .many => @compileError("cannot generate IPLD encoder for [*]T pointers"),
+                .c => @compileError("cannot generate IPLD encoder for [*c]T pointers"),
             },
-            .Struct => |info| {
+            .@"struct" => |info| {
                 inline for (info.decls) |decl| {
                     if (comptime std.mem.eql(u8, decl.name, "encodeIpldInteger")) {
                         const return_type = switch (@typeInfo(@TypeOf(T.encodeIpldInteger))) {
@@ -740,7 +735,7 @@ pub const Encoder = struct {
                         return try self.writeType(return_payload, value_int, writer);
                     } else if (comptime std.mem.eql(u8, decl.name, "writeIpldString")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.writeIpldString))) {
-                            .Fn => |func_info| func_info,
+                            .@"fn" => |func_info| func_info,
                             else => @compileError("T.writeIpldString must be a function"),
                         };
 
@@ -750,7 +745,7 @@ pub const Encoder = struct {
                         };
 
                         switch (@typeInfo(return_payload)) {
-                            .Void => {},
+                            .void => {},
                             else => @compileError("T.writeIpldString must return a void error union"),
                         }
 
@@ -760,7 +755,7 @@ pub const Encoder = struct {
                         return;
                     } else if (comptime std.mem.eql(u8, decl.name, "writeIpldBytes")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.writeIpldBytes))) {
-                            .Fn => |func_info| func_info,
+                            .@"fn" => |func_info| func_info,
                             else => @compileError("T.writeIpldBytes must be a function"),
                         };
 

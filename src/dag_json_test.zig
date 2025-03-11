@@ -29,62 +29,62 @@ test "dynamic value fixture" {
         Fixture.init(Value.True, "true"),
         Fixture.init(Value.Null, "null"),
 
-        Fixture.init(Value.integer(0), "0"),
-        Fixture.init(Value.integer(1), "1"),
-        Fixture.init(Value.integer(23), "23"),
-        Fixture.init(Value.integer(24), "24"),
-        Fixture.init(Value.integer(0xff), "255"),
-        Fixture.init(Value.integer(0xffff), "65535"),
-        Fixture.init(Value.integer(0xffffff), "16777215"),
-        Fixture.init(Value.integer(0xffffffff), "4294967295"),
+        Fixture.init(Value.createInteger(0), "0"),
+        Fixture.init(Value.createInteger(1), "1"),
+        Fixture.init(Value.createInteger(23), "23"),
+        Fixture.init(Value.createInteger(24), "24"),
+        Fixture.init(Value.createInteger(0xff), "255"),
+        Fixture.init(Value.createInteger(0xffff), "65535"),
+        Fixture.init(Value.createInteger(0xffffff), "16777215"),
+        Fixture.init(Value.createInteger(0xffffffff), "4294967295"),
 
-        Fixture.init(Value.integer(-10), "-10"),
-        Fixture.init(Value.integer(-100), "-100"),
-        Fixture.init(Value.integer(-1000), "-1000"),
-        Fixture.init(Value.integer(-10000), "-10000"),
-        Fixture.init(Value.integer(-100000), "-100000"),
+        Fixture.init(Value.createInteger(-10), "-10"),
+        Fixture.init(Value.createInteger(-100), "-100"),
+        Fixture.init(Value.createInteger(-1000), "-1000"),
+        Fixture.init(Value.createInteger(-10000), "-10000"),
+        Fixture.init(Value.createInteger(-100000), "-100000"),
 
-        Fixture.init(Value.integer(std.math.minInt(i64)), "-9223372036854775808"),
-        Fixture.init(Value.integer(std.math.maxInt(i64)), "9223372036854775807"),
+        Fixture.init(Value.createInteger(std.math.minInt(i64)), "-9223372036854775808"),
+        Fixture.init(Value.createInteger(std.math.maxInt(i64)), "9223372036854775807"),
 
         // TODO
-        Fixture.init(Value.float(1), "1.0"),
-        Fixture.init(Value.float(std.math.pi), "3.141592653589793"),
+        Fixture.init(Value.createFloat(1), "1.0"),
+        Fixture.init(Value.createFloat(std.math.pi), "3.141592653589793"),
 
-        Fixture.init(try Value.createMap(allocator, .{ .foo = Value.integer(4) }),
+        Fixture.init(try Value.createMap(allocator, .{ .foo = Value.createInteger(4) }),
             \\{"foo":4}
         ),
 
-        Fixture.init(try Value.createMap(allocator, .{ .foo = Value.integer(4), .bar = Value.Null }),
+        Fixture.init(try Value.createMap(allocator, .{ .foo = Value.createInteger(4), .bar = Value.Null }),
             \\{"bar":null,"foo":4}
         ),
 
         Fixture.init(try Value.createMap(allocator, .{
-            .foo = Value.integer(4),
+            .foo = Value.createInteger(4),
             .bar = try Value.createList(allocator, .{
-                Value.integer(0xffff),
-                Value.integer(0xffffffff),
-                Value.integer(0x7fffffffffffffff),
+                Value.createInteger(0xffff),
+                Value.createInteger(0xffffffff),
+                Value.createInteger(0x7fffffffffffffff),
             }),
         }),
             \\{"bar":[65535,4294967295,9223372036854775807],"foo":4}
         ),
 
         Fixture.init(try Value.createList(allocator, .{
-            Value.integer(0xffff),
-            Value.integer(0xffffffff),
-            Value.integer(0x7fffffffffffffff),
-            try Value.createMap(allocator, .{ .foo = Value.integer(4), .bar = try Value.createString(allocator, "hello world") }),
+            Value.createInteger(0xffff),
+            Value.createInteger(0xffffffff),
+            Value.createInteger(0x7fffffffffffffff),
+            try Value.createMap(allocator, .{ .foo = Value.createInteger(4), .bar = try Value.createString(allocator, "hello world") }),
         }),
             \\[65535,4294967295,9223372036854775807,{"bar":"hello world","foo":4}]
         ),
 
         Fixture.init(try Value.createList(allocator, .{
-            Value.integer(0xffff),
-            Value.integer(0xffffffff),
-            Value.integer(0x7fffffffffffffff),
+            Value.createInteger(0xffff),
+            Value.createInteger(0xffffffff),
+            Value.createInteger(0x7fffffffffffffff),
             try Value.createMap(allocator, .{
-                .foo = Value.integer(4),
+                .foo = Value.createInteger(4),
             }),
         }),
             \\[65535,4294967295,9223372036854775807,{"foo":4}]
