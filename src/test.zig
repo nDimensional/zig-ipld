@@ -74,16 +74,21 @@ test "ipld/codec-fixtures" {
         const json_fixture = try Fixture.init(allocator, fixture_dir, .@"dag-json");
         defer json_fixture.deinit();
 
+        var cbor_file_buffer: [4096]u8 = undefined;
+        var json_file_buffer: [4096]u8 = undefined;
+
         for (known_failures) |failure| {
             if (std.mem.eql(u8, failure.name, entry.name)) {
+                var cbor_file_reader = cbor_fixture.file.reader(&cbor_file_buffer);
                 try std.testing.expectError(
                     failure.err,
-                    cbor_decoder.readValue(allocator, cbor_fixture.file.reader().any()),
+                    cbor_decoder.readValue(allocator, &cbor_file_reader.interface),
                 );
 
+                var json_file_reader = json_fixture.file.reader(&json_file_buffer);
                 try std.testing.expectError(
                     failure.err,
-                    json_decoder.readValue(allocator, json_fixture.file.reader().any()),
+                    json_decoder.readValue(allocator, &json_file_reader.interface),
                 );
 
                 continue :iter;

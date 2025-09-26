@@ -115,37 +115,37 @@ pub const Decoder = struct {
 
     options: Options,
     allocator: std.mem.Allocator,
-    buffer: std.ArrayListUnmanaged(u8),
+    buffer: std.ArrayList(u8),
 
     pub fn init(allocator: std.mem.Allocator, options: Options) Decoder {
         return .{
             .options = options,
             .allocator = allocator,
-            .buffer = std.ArrayListUnmanaged(u8){},
+            .buffer = std.ArrayList(u8){},
         };
     }
 
-    pub fn deinit(self: *Decoder) void {
+    pub inline fn deinit(self: *Decoder) void {
         self.buffer.deinit(self.allocator);
     }
 
     pub fn decodeType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, data: []const u8) !Result(T) {
-        var stream = std.io.fixedBufferStream(data);
-        const reader = stream.reader().any();
-        const result = try self.readType(T, allocator, reader);
-        if (stream.pos != data.len) {
-            result.deinit();
+        var reader = std.io.Reader.fixed(data);
+
+        const result = try self.readType(T, allocator, &reader);
+        errdefer result.deinit();
+
+        if (reader.end != data.len)
             return error.ExtraneousData;
-        }
 
         return result;
     }
 
-    pub fn readType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: std.io.AnyReader) !Result(T) {
+    pub fn readType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: *std.io.Reader) !Result(T) {
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
 
-        var r = std.json.reader(self.allocator, reader);
+        var r = std.json.Reader.init(allocator, reader);
         defer r.deinit();
 
         const value = try self.readTypeNext(T, arena.allocator(), &r);
@@ -162,12 +162,7 @@ pub const Decoder = struct {
         return .{ .arena = arena, .value = value };
     }
 
-    fn readTypeNext(
-        self: *Decoder,
-        comptime T: type,
-        allocator: std.mem.Allocator,
-        reader: *std.json.Reader(std.json.default_buffer_size, std.io.AnyReader),
-    ) !T {
+    fn readTypeNext(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: *std.json.Reader) !T {
         if (T == Value)
             return try self.readValueNext(allocator, reader);
 
@@ -264,20 +259,19 @@ pub const Decoder = struct {
                     if (info.sentinel_ptr != null) @compileError("pointer sentinels are not supported");
                     try pop(reader, .array_begin);
 
-                    var array = std.ArrayList(info.child).init(self.allocator);
-                    defer array.deinit();
+                    var array = std.ArrayList(info.child).empty;
+                    defer array.deinit(self.allocator);
 
                     while (try reader.peekNextTokenType() != .array_end) {
                         const item = try self.readTypeNext(info.child, allocator, reader);
-                        try array.append(item);
+                        try array.append(self.allocator, item);
                     }
 
                     try pop(reader, .array_end);
 
-                    const result = try allocator.alloc(info.child, array.items.len);
-                    @memcpy(result, array.items);
-
-                    return result;
+                    const data = try allocator.alloc(info.child, array.items.len);
+                    @memcpy(data, array.items);
+                    return data;
                 },
                 .many => @compileError("cannot generate IPLD decoder for [*]T pointers"),
                 .c => @compileError("cannot generate IPLD decoder for [*c]T pointers"),
@@ -402,15 +396,15 @@ pub const Decoder = struct {
     }
 
     pub fn decodeValue(self: *Decoder, allocator: std.mem.Allocator, data: []const u8) !Value {
-        var stream = std.io.fixedBufferStream(data);
-        const reader = stream.reader().any();
-        const value = try self.readValue(allocator, reader);
-        if (stream.pos != data.len) return error.ExtraneousData;
+        var reader = std.io.Reader.fixed(data);
+        const value = try self.readValue(allocator, &reader);
+        if (reader.end != data.len)
+            return error.ExtraneousData;
         return value;
     }
 
-    pub fn readValue(self: *Decoder, allocator: std.mem.Allocator, reader: std.io.AnyReader) !Value {
-        var r = std.json.reader(allocator, reader);
+    pub fn readValue(self: *Decoder, allocator: std.mem.Allocator, reader: *std.io.Reader) !Value {
+        var r = std.json.Reader.init(allocator, reader);
         defer r.deinit();
 
         const value = try self.readValueNext(allocator, &r);
@@ -427,11 +421,7 @@ pub const Decoder = struct {
         return value;
     }
 
-    fn readValueNext(
-        self: *Decoder,
-        allocator: std.mem.Allocator,
-        reader: *std.json.Reader(std.json.default_buffer_size, std.io.AnyReader),
-    ) !Value {
+    fn readValueNext(self: *Decoder, allocator: std.mem.Allocator, reader: *std.json.Reader) !Value {
         switch (try reader.peekNextTokenType()) {
             .string => {
                 const str = try self.copyString(reader);
@@ -533,10 +523,7 @@ pub const Decoder = struct {
         }
     }
 
-    fn copyNumber(
-        self: *Decoder,
-        reader: *std.json.Reader(std.json.default_buffer_size, std.io.AnyReader),
-    ) ![]const u8 {
+    fn copyNumber(self: *Decoder, reader: *std.json.Reader) ![]const u8 {
         self.buffer.clearRetainingCapacity();
         try peek(reader, .number);
         while (true) {
@@ -552,10 +539,7 @@ pub const Decoder = struct {
         }
     }
 
-    fn copyString(
-        self: *Decoder,
-        reader: *std.json.Reader(std.json.default_buffer_size, std.io.AnyReader),
-    ) ![]const u8 {
+    fn copyString(self: *Decoder, reader: *std.json.Reader) ![]const u8 {
         self.buffer.clearRetainingCapacity();
         try peek(reader, .string);
         while (true) {
@@ -574,11 +558,7 @@ pub const Decoder = struct {
         }
     }
 
-    fn decodeBytes(
-        self: *Decoder,
-        allocator: std.mem.Allocator,
-        reader: *std.json.Reader(std.json.default_buffer_size, std.io.AnyReader),
-    ) ![]const u8 {
+    fn decodeBytes(self: *Decoder, allocator: std.mem.Allocator, reader: *std.json.Reader) ![]const u8 {
         try pop(reader, .object_begin);
         try self.expectString(reader, "/");
         try pop(reader, .object_begin);
@@ -588,27 +568,17 @@ pub const Decoder = struct {
         return try multibase.base64.decode(allocator, str);
     }
 
-    inline fn peek(
-        reader: *std.json.Reader(std.json.default_buffer_size, std.io.AnyReader),
-        expected: std.json.TokenType,
-    ) !void {
+    inline fn peek(reader: *std.json.Reader, expected: std.json.TokenType) !void {
         if (try reader.peekNextTokenType() != expected)
             return error.InvalidType;
     }
 
-    inline fn pop(
-        reader: *std.json.Reader(std.json.default_buffer_size, std.io.AnyReader),
-        expected: std.json.TokenType,
-    ) !void {
+    inline fn pop(reader: *std.json.Reader, expected: std.json.TokenType) !void {
         try peek(reader, expected);
         _ = reader.next() catch unreachable;
     }
 
-    inline fn expectString(
-        self: *Decoder,
-        reader: *std.json.Reader(std.json.default_buffer_size, std.io.AnyReader),
-        expected: []const u8,
-    ) !void {
+    inline fn expectString(self: *Decoder, reader: *std.json.Reader, expected: []const u8) !void {
         const str = try self.copyString(reader);
         if (!std.mem.eql(u8, str, expected))
             return error.InvalidType;
@@ -636,33 +606,36 @@ pub const Encoder = struct {
         float_format: FloatFormat = FloatFormat.Decimal,
     };
 
+    allocator: std.mem.Allocator,
     options: Options,
-    buffer: std.ArrayList(u8),
-    string_buffer: std.ArrayList(u8),
+    outer_buffer: std.io.Writer.Allocating,
+    inner_buffer: std.io.Writer.Allocating,
 
     pub fn init(allocator: std.mem.Allocator, options: Options) Encoder {
         return .{
+            .allocator = allocator,
             .options = options,
-            .buffer = std.ArrayList(u8).init(allocator),
-            .string_buffer = std.ArrayList(u8).init(allocator),
+            .outer_buffer = std.io.Writer.Allocating.init(allocator),
+            .inner_buffer = std.io.Writer.Allocating.init(allocator),
         };
     }
 
     pub fn deinit(self: *Encoder) void {
-        self.buffer.deinit();
-        self.string_buffer.deinit();
+        self.outer_buffer.deinit();
+        self.inner_buffer.deinit();
     }
 
     pub fn encodeType(self: *Encoder, T: type, allocator: std.mem.Allocator, value: T) ![]const u8 {
-        self.buffer.clearRetainingCapacity();
-        try self.writeType(T, value, self.buffer.writer().any());
+        self.outer_buffer.clearRetainingCapacity();
+        try self.writeType(T, value, &self.outer_buffer.writer);
 
-        const bytes = try allocator.alloc(u8, self.buffer.items.len);
-        @memcpy(bytes, self.buffer.items);
-        return bytes;
+        const data = self.outer_buffer.written();
+        const copy = try allocator.alloc(u8, data.len);
+        @memcpy(copy, data);
+        return copy;
     }
 
-    pub fn writeType(self: *Encoder, comptime T: type, value: T, writer: std.io.AnyWriter) !void {
+    pub fn writeType(self: *Encoder, comptime T: type, value: T, writer: *std.io.Writer) !void {
         if (T == Value)
             return try self.writeValue(value, writer);
 
@@ -681,7 +654,7 @@ pub const Encoder = struct {
                 false => try writer.writeAll("false"),
                 true => try writer.writeAll("true"),
             },
-            .int => try std.fmt.format(writer, "{d}", .{value}),
+            .int => try writer.print("{d}", .{value}),
             .float => try self.writeFloat(writer, @floatCast(value)),
             .@"enum" => |info| {
                 const kind = comptime getRepresentation(T, info.decls) orelse Kind.integer;
@@ -739,6 +712,8 @@ pub const Encoder = struct {
                             else => @compileError("T.writeIpldString must be a function"),
                         };
 
+                        // TODO: validate func_info.params
+
                         const return_payload = switch (@typeInfo(func_info.return_type orelse .NoReturn)) {
                             .ErrorUnion => |error_union_info| error_union_info.payload,
                             else => @compileError("T.writeIpldString must return a void error union"),
@@ -749,9 +724,10 @@ pub const Encoder = struct {
                             else => @compileError("T.writeIpldString must return a void error union"),
                         }
 
-                        self.string_buffer.clearRetainingCapacity();
-                        try value.writeIpldString(self.string_buffer.writer().any());
-                        try writeString(writer, self.string_buffer.items);
+                        self.inner_buffer.clearRetainingCapacity();
+
+                        try value.writeIpldString(&self.inner_buffer.writer);
+                        try writeString(writer, self.inner_buffer.written());
                         return;
                     } else if (comptime std.mem.eql(u8, decl.name, "writeIpldBytes")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.writeIpldBytes))) {
@@ -769,9 +745,9 @@ pub const Encoder = struct {
                             else => @compileError("T.writeIpldBytes must return a void error union"),
                         }
 
-                        self.string_buffer.clearRetainingCapacity();
-                        try T.writeIpldBytes(value, self.string_buffer.writer().any());
-                        try writeBytes(writer, self.string_buffer.items);
+                        self.inner_buffer.clearRetainingCapacity();
+                        try T.writeIpldBytes(value, &self.inner_buffer.writer);
+                        try writeBytes(writer, self.inner_buffer.written());
                         return;
                     }
                 }
@@ -804,21 +780,23 @@ pub const Encoder = struct {
     }
 
     pub fn encodeValue(self: *Encoder, allocator: std.mem.Allocator, value: Value) ![]const u8 {
-        self.buffer.clearRetainingCapacity();
-        try self.writeValue(value, self.buffer.writer().any());
-        const copy = try allocator.alloc(u8, self.buffer.items.len);
-        @memcpy(copy, self.buffer.items);
+        self.outer_buffer.clearRetainingCapacity();
+        try self.writeValue(value, &self.outer_buffer.writer);
+
+        const data = self.outer_buffer.written();
+        const copy = try allocator.alloc(u8, data.len);
+        @memcpy(copy, data);
         return copy;
     }
 
-    pub fn writeValue(self: *Encoder, value: Value, writer: std.io.AnyWriter) !void {
+    pub fn writeValue(self: *Encoder, value: Value, writer: *std.io.Writer) !void {
         switch (value) {
             .null => try writer.writeAll("null"),
             .boolean => |value_bool| switch (value_bool) {
                 false => try writer.writeAll("false"),
                 true => try writer.writeAll("true"),
             },
-            .integer => |value_int| try std.fmt.format(writer, "{d}", .{value_int}),
+            .integer => |value_int| try writer.print("{d}", .{value_int}),
             .float => |value_float| try self.writeFloat(writer, @floatCast(value_float)),
             .string => |string| try writeString(writer, string.data),
             .bytes => |bytes| try writeBytes(writer, bytes.data),
@@ -859,17 +837,17 @@ pub const Encoder = struct {
         }
     }
 
-    fn writeLink(writer: std.io.AnyWriter, cid: CID) !void {
+    fn writeLink(writer: *std.io.Writer, cid: CID) !void {
         try writer.writeAll(
             \\{"/":"
         );
-        try std.fmt.format(writer, "{s}", .{cid});
+        try cid.format(writer);
         try writer.writeAll(
             \\"}
         );
     }
 
-    inline fn writeFloat(self: *Encoder, writer: std.io.AnyWriter, value: f64) !void {
+    inline fn writeFloat(self: *Encoder, writer: *std.io.Writer, value: f64) !void {
         if (std.math.isNan(value) or std.math.isInf(value))
             return error.UnsupportedValue;
 
@@ -878,10 +856,10 @@ pub const Encoder = struct {
 
         switch (self.options.float_format) {
             .scientific => {
-                try std.fmt.format(writer, "{e}", .{value});
+                try writer.print("{e}", .{value});
             },
             .decimal => {
-                try std.fmt.format(writer, "{d}", .{value});
+                try writer.print("{d}", .{value});
                 if (@floor(value) == value)
                     try writer.writeAll(".0");
             },
@@ -890,26 +868,24 @@ pub const Encoder = struct {
 
                 if (range.min_exp10) |min_exp10|
                     if (exp < min_exp10)
-                        return try std.fmt.format(writer, "{e}", .{value});
+                        return try writer.print("{e}", .{value});
 
                 if (range.max_exp10) |max_exp10|
                     if (max_exp10 < exp)
-                        return try std.fmt.format(writer, "{e}", .{value});
+                        return try writer.print("{e}", .{value});
 
-                try std.fmt.format(writer, "{d}", .{value});
+                try writer.print("{d}", .{value});
                 if (@floor(value) == value)
                     try writer.writeAll(".0");
             },
         }
     }
 
-    inline fn writeString(writer: std.io.AnyWriter, data: []const u8) !void {
-        try std.json.encodeJsonString(data, .{
-            .escape_unicode = false,
-        }, writer);
+    inline fn writeString(writer: *std.io.Writer, data: []const u8) !void {
+        try std.json.Stringify.encodeJsonString(data, .{ .escape_unicode = false }, writer);
     }
 
-    fn writeBytes(writer: std.io.AnyWriter, data: []const u8) !void {
+    fn writeBytes(writer: *std.io.Writer, data: []const u8) !void {
         try writer.writeAll(
             \\{"/":{"bytes":"
         );

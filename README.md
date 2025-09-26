@@ -308,12 +308,12 @@ If you want more flexibility, you can also add public function declarations to y
 To represent a struct/enum/union as a string, add declarations
 
 - `pub fn parseIpldString(allocator: std.mem.Allocator, data: []const u8) !@This()`
-- `pub fn writeIpldString(self: @This(), writer: std.io.AnyWriter) !void`
+- `pub fn writeIpldString(self: @This(), writer: *std.io.Writer) !void`
 
 For bytes, add
 
 - `pub fn parseIpldBytes(allocator: std.mem.Allocator, data: []const u8) !@This()`
-- `pub fn writeIpldBytes(self: @This(), writer: std.io.AnyWriter) !void`
+- `pub fn writeIpldBytes(self: @This(), writer: *std.io.Writer) !void`
 
 These are what the `String` and `Bytes` structs internally. When parsing, they copy `data` using `allocator`, and when writing, they just call `writer.writeAll(self.data)`.
 
@@ -327,7 +327,7 @@ pub const Bytes = struct {
         return .{ .data = copy };
     }
 
-    pub fn writeIpldBytes(self: Bytes, writer: std.io.AnyWriter) !void {
+    pub fn writeIpldBytes(self: Bytes, writer: *std.io.Writer) !void {
         try writer.writeAll(self.data);
     }
 };
@@ -341,7 +341,7 @@ pub const String = struct {
         return .{ .data = copy };
     }
 
-    pub fn writeIpldString(self: String, writer: std.io.AnyWriter) !void {
+    pub fn writeIpldString(self: String, writer: *std.io.Writer) !void {
         try writer.writeAll(self.data);
     }
 };

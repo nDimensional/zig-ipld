@@ -53,24 +53,51 @@ pub fn build(b: *std.Build) void {
 
     // Tests
 
-    const ipld_tests = b.addTest(.{ .root_source_file = b.path("src/test.zig") });
-    ipld_tests.root_module.addImport("cid", cid);
-    ipld_tests.root_module.addImport("multicodec", multicodec);
-    ipld_tests.root_module.addImport("ipld", ipld);
-    ipld_tests.root_module.addImport("dag-json", dag_json);
-    ipld_tests.root_module.addImport("dag-cbor", dag_cbor);
+    const ipld_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/test.zig"),
+            .imports = &.{
+                .{ .name = "cid", .module = cid },
+                .{ .name = "multicodec", .module = multicodec },
+                .{ .name = "ipld", .module = ipld },
+                .{ .name = "dag-json", .module = dag_json },
+                .{ .name = "dag-cbor", .module = dag_cbor },
+            },
+        }),
+    });
+
     const run_ipld_tests = b.addRunArtifact(ipld_tests);
     b.step("test-ipld", "Run ipld tests").dependOn(&run_ipld_tests.step);
 
-    const dag_cbor_tests = b.addTest(.{ .root_source_file = b.path("src/dag_cbor_test.zig") });
-    dag_cbor_tests.root_module.addImport("ipld", ipld);
-    dag_cbor_tests.root_module.addImport("dag-cbor", dag_cbor);
+    const dag_cbor_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/dag_cbor_test.zig"),
+            .imports = &.{
+                .{ .name = "ipld", .module = ipld },
+                .{ .name = "dag-cbor", .module = dag_cbor },
+            },
+        }),
+    });
+
     const run_dag_cbor_tests = b.addRunArtifact(dag_cbor_tests);
     b.step("test-dag-cbor", "Run dag-cbor tests").dependOn(&run_dag_cbor_tests.step);
 
-    const dag_json_tests = b.addTest(.{ .root_source_file = b.path("src/dag_json_test.zig") });
-    dag_json_tests.root_module.addImport("ipld", ipld);
-    dag_json_tests.root_module.addImport("dag-json", dag_json);
+    const dag_json_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/dag_json_test.zig"),
+            .imports = &.{
+                .{ .name = "ipld", .module = ipld },
+                .{ .name = "dag-json", .module = dag_json },
+            },
+        }),
+    });
+
     const run_dag_json_tests = b.addRunArtifact(dag_json_tests);
     b.step("test-dag-json", "Run dag-json tests").dependOn(&run_dag_json_tests.step);
 
@@ -82,14 +109,18 @@ pub fn build(b: *std.Build) void {
     // Example
     const example = b.addExecutable(.{
         .name = "zig-ipld-example",
-        .root_source_file = b.path("example.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("example.zig"),
+            .imports = &.{
+                .{ .name = "ipld", .module = ipld },
+                .{ .name = "dag-json", .module = dag_json },
+                .{ .name = "dag-cbor", .module = dag_cbor },
+            },
+        }),
     });
 
-    example.root_module.addImport("ipld", ipld);
-    example.root_module.addImport("dag-json", dag_json);
-    example.root_module.addImport("dag-cbor", dag_cbor);
     const run_example = b.addRunArtifact(example);
     b.step("run-example", "Run example.zig").dependOn(&run_example.step);
 }

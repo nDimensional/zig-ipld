@@ -556,23 +556,19 @@ pub const Value = union(Kind) {
     }
 
     /// Format a Value
-    pub fn format(self: Value, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
-        _ = fmt;
-        _ = options;
+    pub fn format(self: Value, writer: *std.io.Writer) !void {
         switch (self) {
-            .null => try std.fmt.format(writer, "Value(Null)", .{}),
-            .boolean => |value| try std.fmt.format(writer, "Value(Boolean: {any})", .{value}),
-            .integer => |value| try std.fmt.format(writer, "Value(Integer: {d})", .{value}),
-            .float => |value| try std.fmt.format(writer, "Value(Float: {e})", .{value}),
+            .null => try writer.print("Value(Null)", .{}),
+            .boolean => |value| try writer.print("Value(Boolean: {any})", .{value}),
+            .integer => |value| try writer.print("Value(Integer: {d})", .{value}),
+            .float => |value| try writer.print("Value(Float: {e})", .{value}),
             .string => |value| {
                 try writer.writeAll("Value(String: ");
-                try std.json.encodeJsonString(value.data, .{ .escape_unicode = true }, writer);
+                try std.json.Stringify.encodeJsonString(value.data, .{ .escape_unicode = true }, writer);
                 try writer.writeAll(")");
             },
             .bytes => |value| {
-                try std.fmt.format(writer, "Value(Bytes: 0x{s})", .{
-                    std.fmt.fmtSliceHexLower(value.data),
-                });
+                try writer.print("Value(Bytes: 0x{x})", .{value.data});
             },
             .list => |value| {
                 const items = value.values();
@@ -582,7 +578,7 @@ pub const Value = union(Kind) {
                 try writer.writeAll("Value(List: [ ");
                 for (items, 0..) |item, i| {
                     if (i > 0) try writer.writeAll(", ");
-                    try std.fmt.format(writer, "{any}", .{item});
+                    try item.format(writer);
                 }
 
                 try writer.writeAll(" ])");
@@ -594,12 +590,13 @@ pub const Value = union(Kind) {
                 try writer.writeAll("Value(Map: { ");
                 for (value.keys(), value.values(), 0..) |k, v, i| {
                     if (i > 0) try writer.writeAll(", ");
-                    try std.json.encodeJsonString(k, .{ .escape_unicode = true }, writer);
-                    try std.fmt.format(writer, " -> {any}", .{v});
+                    try std.json.Stringify.encodeJsonString(k, .{ .escape_unicode = true }, writer);
+                    try writer.writeAll(" -> ");
+                    try v.format(writer);
                 }
                 try writer.writeAll(" })");
             },
-            .link => |value| try std.fmt.format(writer, "Value(Link: {s})", .{value.cid}),
+            .link => |value| try writer.print("Value(Link: {s})", .{value.cid}),
         }
     }
 };

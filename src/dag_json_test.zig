@@ -99,11 +99,11 @@ test "dynamic value fixture" {
             try Value.parseLink(allocator, "bafybeiczsscdsbs7ffqz55asqdf3smv6klcw3gofszvwlyarci47bgf354"),
         }),
             \\[
-            ++
+        ++
             \\{"/":"QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn"},
-            ++
+        ++
             \\{"/":"bafybeiczsscdsbs7ffqz55asqdf3smv6klcw3gofszvwlyarci47bgf354"}
-            ++
+        ++
             \\]
         ),
 
@@ -217,14 +217,14 @@ test "static type fixtures" {
         fixture.testDecoder(allocator, &decoder) catch |err| {
             std.log.err("failed to decode fixture", .{});
             std.log.err("- value {any}: {any}", .{fixture.T, value.*});
-            std.log.err("- bytes {}", .{std.fmt.fmtSliceHexLower(fixture.bytes)});
+            std.log.err("- bytes {x}", .{fixture.bytes});
             return err;
         };
 
         fixture.testEncoder(allocator, &encoder) catch |err| {
             std.log.err("failed to encode fixture", .{});
             std.log.err("- value {any}: {any}", .{fixture.T, value.*});
-            std.log.err("- bytes {}", .{std.fmt.fmtSliceHexLower(fixture.bytes)});
+            std.log.err("- bytes {x}", .{fixture.bytes});
             return err;
         };
     }

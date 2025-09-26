@@ -54,8 +54,8 @@ pub const Header = packed struct {
         return .{ .major_type = .SimpleOrFloat, .argument = @intFromEnum(value) };
     }
 
-    pub inline fn read(reader: std.io.AnyReader) !Header {
-        const byte = try reader.readByte();
+    pub inline fn read(reader: *std.io.Reader) !Header {
+        const byte = try reader.takeByte();
         return Header.decode(byte);
     }
 
@@ -177,25 +177,26 @@ pub const Decoder = struct {
     }
 
     options: Options,
+    allocator: std.mem.Allocator,
     buffer: std.ArrayList(u8),
     argument_buffer: [8]u8 = undefined,
 
     pub fn init(allocator: std.mem.Allocator, options: Options) Decoder {
         return .{
+            .allocator = allocator,
             .options = options,
-            .buffer = std.ArrayList(u8).init(allocator),
+            .buffer = std.ArrayList(u8).empty,
         };
     }
 
     pub fn deinit(self: *Decoder) void {
-        self.buffer.deinit();
+        self.buffer.deinit(self.allocator);
     }
 
     pub fn decodeType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, data: []const u8) !Result(T) {
-        var stream = std.io.fixedBufferStream(data);
-        const reader = stream.reader().any();
-        const result = try self.readType(T, allocator, reader);
-        if (stream.pos != data.len) {
+        var reader = std.io.Reader.fixed(data);
+        const result = try self.readType(T, allocator, &reader);
+        if (reader.end != data.len) {
             result.deinit();
             return error.ExtraneousData;
         }
@@ -203,7 +204,7 @@ pub const Decoder = struct {
         return result;
     }
 
-    pub fn readType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: std.io.AnyReader) !Result(T) {
+    pub fn readType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: *std.io.Reader) !Result(T) {
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
 
@@ -211,7 +212,7 @@ pub const Decoder = struct {
         return .{ .arena = arena, .value = value };
     }
 
-    inline fn readTypeAlloc(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: std.io.AnyReader) !T {
+    inline fn readTypeAlloc(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: *std.io.Reader) !T {
         if (T == Value)
             return try self.readValue(allocator, reader);
 
@@ -223,7 +224,7 @@ pub const Decoder = struct {
         self: *Decoder,
         comptime T: type,
         allocator: std.mem.Allocator,
-        reader: std.io.AnyReader,
+        reader: *std.io.Reader,
         header: Header,
     ) !T {
         if (T == CID) {
@@ -294,8 +295,8 @@ pub const Decoder = struct {
                     .string => {
                         try header.expectType(.TextString);
                         const len = try self.readArgumentInt(header, reader);
-                        try self.buffer.resize(len);
-                        try reader.readNoEof(self.buffer.items);
+                        try self.buffer.resize(self.allocator, len);
+                        try reader.readSliceAll(self.buffer.items);
 
                         inline for (info.fields) |field|
                             if (std.mem.eql(u8, field.name, self.buffer.items))
@@ -378,8 +379,8 @@ pub const Decoder = struct {
 
                         try header.expectType(.TextString);
                         const len = try self.readArgumentInt(header, reader);
-                        try self.buffer.resize(len);
-                        try reader.readNoEof(self.buffer.items);
+                        try self.buffer.resize(self.allocator, len);
+                        try reader.readSliceAll(self.buffer.items);
                         return try T.parseIpldString(allocator, self.buffer.items);
                     } else if (comptime std.mem.eql(u8, decl.name, "parseIpldBytes")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.parseIpldBytes))) {
@@ -397,8 +398,8 @@ pub const Decoder = struct {
 
                         try header.expectType(.ByteString);
                         const len = try self.readArgumentInt(header, reader);
-                        try self.buffer.resize(len);
-                        try reader.readNoEof(self.buffer.items);
+                        try self.buffer.resize(self.allocator, len);
+                        try reader.readSliceAll(self.buffer.items);
                         return try T.parseIpldBytes(allocator, self.buffer.items);
                     }
                 }
@@ -458,14 +459,14 @@ pub const Decoder = struct {
     }
 
     pub fn decodeValue(self: *Decoder, allocator: std.mem.Allocator, data: []const u8) !Value {
-        var stream = std.io.fixedBufferStream(data);
-        const reader = stream.reader().any();
-        const value = try self.readValue(allocator, reader);
-        if (stream.pos != data.len) return error.ExtraneousData;
+        var reader = std.io.Reader.fixed(data);
+        const value = try self.readValue(allocator, &reader);
+        if (reader.end != data.len)
+            return error.ExtraneousData;
         return value;
     }
 
-    pub fn readValue(self: *Decoder, allocator: std.mem.Allocator, reader: std.io.AnyReader) !Value {
+    pub fn readValue(self: *Decoder, allocator: std.mem.Allocator, reader: *std.io.Reader) !Value {
         const header = try Header.read(reader);
 
         switch (header.major_type) {
@@ -483,14 +484,14 @@ pub const Decoder = struct {
             },
             .ByteString => {
                 const len = try self.readArgumentInt(header, reader);
-                try self.buffer.resize(len);
-                try reader.readNoEof(self.buffer.items);
+                try self.buffer.resize(self.allocator, len);
+                try reader.readSliceAll(self.buffer.items);
                 return try Value.createBytes(allocator, self.buffer.items);
             },
             .TextString => {
                 const len = try self.readArgumentInt(header, reader);
-                try self.buffer.resize(len);
-                try reader.readNoEof(self.buffer.items);
+                try self.buffer.resize(self.allocator, len);
+                try reader.readSliceAll(self.buffer.items);
                 return try Value.createString(allocator, self.buffer.items);
             },
             .Array => {
@@ -545,25 +546,25 @@ pub const Decoder = struct {
         }
     }
 
-    fn readArgumentInt(self: *Decoder, header: Header, reader: std.io.AnyReader) !u64 {
+    fn readArgumentInt(self: *Decoder, header: Header, reader: *std.io.Reader) !u64 {
         if (header.argument < 24) {
             return @intCast(header.argument);
         } else if (header.argument == 24) {
-            const value = try reader.readByte();
+            const value = try reader.takeByte();
             if (self.options.strict and value < 24) return error.Strict;
             return @intCast(value);
         } else if (header.argument == 25) {
-            try reader.readNoEof(self.argument_buffer[0..2]);
+            try reader.readSliceAll(self.argument_buffer[0..2]);
             const value = std.mem.readInt(u16, self.argument_buffer[0..2], .big);
             if (self.options.strict and value <= std.math.maxInt(u8)) return error.Strict;
             return @intCast(value);
         } else if (header.argument == 26) {
-            try reader.readNoEof(self.argument_buffer[0..4]);
+            try reader.readSliceAll(self.argument_buffer[0..4]);
             const value = std.mem.readInt(u32, self.argument_buffer[0..4], .big);
             if (self.options.strict and value <= std.math.maxInt(u16)) return error.Strict;
             return @intCast(value);
         } else if (header.argument == 27) {
-            try reader.readNoEof(self.argument_buffer[0..8]);
+            try reader.readSliceAll(self.argument_buffer[0..8]);
             const value = std.mem.readInt(u64, self.argument_buffer[0..8], .big);
             if (self.options.strict and value <= std.math.maxInt(u32)) return error.Strict;
             return value;
@@ -572,38 +573,38 @@ pub const Decoder = struct {
         }
     }
 
-    fn readArgumentFloat(self: *Decoder, header: Header, reader: std.io.AnyReader) !f64 {
+    fn readArgumentFloat(self: *Decoder, header: Header, reader: *std.io.Reader) !f64 {
         if (header.argument == 25) {
             if (self.options.strict) return error.InvalidType;
-            try reader.readNoEof(self.argument_buffer[0..2]);
+            try reader.readSliceAll(self.argument_buffer[0..2]);
             return @floatCast(@as(f16, @bitCast(std.mem.readInt(u16, self.argument_buffer[0..2], .big))));
         } else if (header.argument == 26) {
             if (self.options.strict) return error.InvalidType;
-            try reader.readNoEof(self.argument_buffer[0..4]);
+            try reader.readSliceAll(self.argument_buffer[0..4]);
             return @floatCast(@as(f32, @bitCast(std.mem.readInt(u32, self.argument_buffer[0..4], .big))));
         } else if (header.argument == 27) {
-            try reader.readNoEof(self.argument_buffer[0..8]);
+            try reader.readSliceAll(self.argument_buffer[0..8]);
             return @bitCast(std.mem.readInt(u64, self.argument_buffer[0..8], .big));
         } else {
             return error.InvalidType;
         }
     }
 
-    fn copyTextString(self: *Decoder, reader: std.io.AnyReader) ![]const u8 {
+    fn copyTextString(self: *Decoder, reader: *std.io.Reader) ![]const u8 {
         const header = try Header.read(reader);
         try header.expectType(.TextString);
         const len = try self.readArgumentInt(header, reader);
-        try self.buffer.resize(len);
-        try reader.readNoEof(self.buffer.items);
+        try self.buffer.resize(self.allocator, len);
+        try reader.readSliceAll(self.buffer.items);
         return self.buffer.items;
     }
 
-    fn copyByteString(self: *Decoder, reader: std.io.AnyReader) ![]const u8 {
+    fn copyByteString(self: *Decoder, reader: *std.io.Reader) ![]const u8 {
         const header = try Header.read(reader);
         try header.expectType(.ByteString);
         const len = try self.readArgumentInt(header, reader);
-        try self.buffer.resize(len);
-        try reader.readNoEof(self.buffer.items);
+        try self.buffer.resize(self.allocator, len);
+        try reader.readSliceAll(self.buffer.items);
         return self.buffer.items;
     }
 };
@@ -612,33 +613,36 @@ pub const Encoder = struct {
     pub const Options = struct {};
 
     options: Options,
-    buffer: std.ArrayList(u8),
+    allocator: std.mem.Allocator,
+    buffer: std.io.Writer.Allocating,
     string_buffer: std.ArrayList(u8),
     argument_buffer: [8]u8 = undefined,
 
     pub fn init(allocator: std.mem.Allocator, options: Options) Encoder {
         return .{
             .options = options,
-            .buffer = std.ArrayList(u8).init(allocator),
-            .string_buffer = std.ArrayList(u8).init(allocator),
+            .allocator = allocator,
+            .buffer = std.io.Writer.Allocating.init(allocator),
+            .string_buffer = std.ArrayList(u8).empty,
         };
     }
 
     pub fn deinit(self: *Encoder) void {
         self.buffer.deinit();
-        self.string_buffer.deinit();
+        self.string_buffer.deinit(self.allocator);
     }
 
     pub fn encodeType(self: *Encoder, T: type, allocator: std.mem.Allocator, value: T) ![]const u8 {
         self.buffer.clearRetainingCapacity();
-        try self.writeType(T, value, self.buffer.writer().any());
+        try self.writeType(T, value, &self.buffer.writer);
 
-        const bytes = try allocator.alloc(u8, self.buffer.items.len);
-        @memcpy(bytes, self.buffer.items);
-        return bytes;
+        const data = self.buffer.written();
+        const copy = try allocator.alloc(u8, data.len);
+        @memcpy(copy, data);
+        return copy;
     }
 
-    pub fn writeType(self: *Encoder, comptime T: type, value: T, writer: std.io.AnyWriter) !void {
+    pub fn writeType(self: *Encoder, comptime T: type, value: T, writer: *std.io.Writer) !void {
         if (T == Value)
             return try self.writeValue(value, writer);
 
@@ -791,14 +795,13 @@ pub const Encoder = struct {
         const bytes = try allocator.alloc(u8, len);
         errdefer allocator.free(bytes);
 
-        var stream = std.io.fixedBufferStream(bytes);
-        const writer = stream.writer().any();
-        try self.writeValue(value, writer);
+        var writer = std.io.Writer.fixed(bytes);
+        try self.writeValue(value, &writer);
 
         return bytes;
     }
 
-    pub fn writeValue(self: *Encoder, value: Value, writer: std.io.AnyWriter) !void {
+    pub fn writeValue(self: *Encoder, value: Value, writer: *std.io.Writer) !void {
         switch (value) {
             .null => try writer.writeByte(Header.fromSimpleValue(.Null).encode()),
             .boolean => |value_bool| switch (value_bool) {
@@ -840,7 +843,7 @@ pub const Encoder = struct {
         }
     }
 
-    fn writeArgumentInt(self: *Encoder, major_type: MajorType, value: u64, writer: std.io.AnyWriter) !void {
+    fn writeArgumentInt(self: *Encoder, major_type: MajorType, value: u64, writer: *std.io.Writer) !void {
         if (value < 24) {
             try writer.writeByte(Header.encode(.{ .major_type = major_type, .argument = @truncate(value) }));
         } else if (value <= 0xff) {
@@ -861,7 +864,7 @@ pub const Encoder = struct {
         }
     }
 
-    fn writeArgumentFloat(self: *Encoder, major_type: MajorType, value: f64, writer: std.io.AnyWriter) !void {
+    fn writeArgumentFloat(self: *Encoder, major_type: MajorType, value: f64, writer: *std.io.Writer) !void {
         const value_bytes = @as(u64, @bitCast(value));
         std.mem.writeInt(u64, self.argument_buffer[0..8], value_bytes, .big);
 
@@ -869,7 +872,7 @@ pub const Encoder = struct {
         try writer.writeAll(self.argument_buffer[0..8]);
     }
 
-    fn writeLink(self: *Encoder, cid: CID, writer: std.io.AnyWriter) !void {
+    fn writeLink(self: *Encoder, cid: CID, writer: *std.io.Writer) !void {
         try writer.writeByte(Header.encode(.{ .major_type = .Tag, .argument = 24 }));
         try writer.writeByte(42);
         try self.writeArgumentInt(.ByteString, cid.encodingLength() + 1, writer);

@@ -10,6 +10,6 @@ pub fn parseIpldString(allocator: std.mem.Allocator, data: []const u8) !String {
     return .{ .data = copy };
 }
 
-pub fn writeIpldString(self: String, writer: std.io.AnyWriter) !void {
+pub fn writeIpldString(self: String, writer: *std.io.Writer) std.io.Writer.Error!void {
     try writer.writeAll(self.data);
 }

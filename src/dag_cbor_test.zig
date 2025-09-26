@@ -103,14 +103,14 @@ test "static type fixtures" {
         fixture.testDecoder(allocator, &decoder) catch |err| {
             std.log.err("failed to decode fixture", .{});
             std.log.err("- value {any}: {any}", .{fixture.T, value.*});
-            std.log.err("- bytes {}", .{std.fmt.fmtSliceHexLower(fixture.bytes)});
+            std.log.err("- bytes {x}", .{fixture.bytes});
             return err;
         };
 
         fixture.testEncoder(allocator, &encoder) catch |err| {
             std.log.err("failed to encode fixture", .{});
             std.log.err("- value {any}: {any}", .{fixture.T, value.*});
-            std.log.err("- bytes {}", .{std.fmt.fmtSliceHexLower(fixture.bytes)});
+            std.log.err("- bytes {x}", .{fixture.bytes});
             return err;
         };
     }
