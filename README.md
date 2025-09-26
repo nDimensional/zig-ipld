@@ -23,16 +23,9 @@ Passes all tests in [ipld/codec-fixtures](https://github.com/ipld/codec-fixtures
 
 Add to `build.zig.zon`:
 
-```zig
-.{
-    // ...
-    .dependencies = .{
-        .ipld = .{
-            .url = "https://github.com/nDimensional/zig-ipld/archive/${COMMIT}.tar.gz",
-            // .hash = "...",
-        },
-    }
-}
+```
+zig fetch --save=ipld \
+  https://github.com/nDimensional/zig-ipld/archive/refs/tags/v0.2.0.tar.gz
 ```
 
 Then in `build.zig`:
