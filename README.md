@@ -25,7 +25,7 @@ Add to `build.zig.zon`:
 
 ```
 zig fetch --save=ipld \
-  https://github.com/nDimensional/zig-ipld/archive/refs/tags/v0.2.0.tar.gz
+  https://github.com/nDimensional/zig-ipld/archive/refs/tags/v0.2.1.tar.gz
 ```
 
 Then in `build.zig`:
