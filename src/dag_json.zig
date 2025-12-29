@@ -130,7 +130,7 @@ pub const Decoder = struct {
     }
 
     pub fn decodeType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, data: []const u8) !Result(T) {
-        var reader = std.io.Reader.fixed(data);
+        var reader = std.Io.Reader.fixed(data);
 
         const result = try self.readType(T, allocator, &reader);
         errdefer result.deinit();
@@ -141,7 +141,7 @@ pub const Decoder = struct {
         return result;
     }
 
-    pub fn readType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: *std.io.Reader) !Result(T) {
+    pub fn readType(self: *Decoder, comptime T: type, allocator: std.mem.Allocator, reader: *std.Io.Reader) !Result(T) {
         var arena = std.heap.ArenaAllocator.init(allocator);
         errdefer arena.deinit();
 
@@ -396,14 +396,14 @@ pub const Decoder = struct {
     }
 
     pub fn decodeValue(self: *Decoder, allocator: std.mem.Allocator, data: []const u8) !Value {
-        var reader = std.io.Reader.fixed(data);
+        var reader = std.Io.Reader.fixed(data);
         const value = try self.readValue(allocator, &reader);
         if (reader.end != data.len)
             return error.ExtraneousData;
         return value;
     }
 
-    pub fn readValue(self: *Decoder, allocator: std.mem.Allocator, reader: *std.io.Reader) !Value {
+    pub fn readValue(self: *Decoder, allocator: std.mem.Allocator, reader: *std.Io.Reader) !Value {
         var r = std.json.Reader.init(allocator, reader);
         defer r.deinit();
 
@@ -608,15 +608,15 @@ pub const Encoder = struct {
 
     allocator: std.mem.Allocator,
     options: Options,
-    outer_buffer: std.io.Writer.Allocating,
-    inner_buffer: std.io.Writer.Allocating,
+    outer_buffer: std.Io.Writer.Allocating,
+    inner_buffer: std.Io.Writer.Allocating,
 
     pub fn init(allocator: std.mem.Allocator, options: Options) Encoder {
         return .{
             .allocator = allocator,
             .options = options,
-            .outer_buffer = std.io.Writer.Allocating.init(allocator),
-            .inner_buffer = std.io.Writer.Allocating.init(allocator),
+            .outer_buffer = std.Io.Writer.Allocating.init(allocator),
+            .inner_buffer = std.Io.Writer.Allocating.init(allocator),
         };
     }
 
@@ -635,7 +635,7 @@ pub const Encoder = struct {
         return copy;
     }
 
-    pub fn writeType(self: *Encoder, comptime T: type, value: T, writer: *std.io.Writer) !void {
+    pub fn writeType(self: *Encoder, comptime T: type, value: T, writer: *std.Io.Writer) !void {
         if (T == Value)
             return try self.writeValue(value, writer);
 
@@ -789,7 +789,7 @@ pub const Encoder = struct {
         return copy;
     }
 
-    pub fn writeValue(self: *Encoder, value: Value, writer: *std.io.Writer) !void {
+    pub fn writeValue(self: *Encoder, value: Value, writer: *std.Io.Writer) !void {
         switch (value) {
             .null => try writer.writeAll("null"),
             .boolean => |value_bool| switch (value_bool) {
@@ -837,7 +837,7 @@ pub const Encoder = struct {
         }
     }
 
-    fn writeLink(writer: *std.io.Writer, cid: CID) !void {
+    fn writeLink(writer: *std.Io.Writer, cid: CID) !void {
         try writer.writeAll(
             \\{"/":"
         );
@@ -847,7 +847,7 @@ pub const Encoder = struct {
         );
     }
 
-    inline fn writeFloat(self: *Encoder, writer: *std.io.Writer, value: f64) !void {
+    inline fn writeFloat(self: *Encoder, writer: *std.Io.Writer, value: f64) !void {
         if (std.math.isNan(value) or std.math.isInf(value))
             return error.UnsupportedValue;
 
@@ -881,11 +881,11 @@ pub const Encoder = struct {
         }
     }
 
-    inline fn writeString(writer: *std.io.Writer, data: []const u8) !void {
+    inline fn writeString(writer: *std.Io.Writer, data: []const u8) !void {
         try std.json.Stringify.encodeJsonString(data, .{ .escape_unicode = false }, writer);
     }
 
-    fn writeBytes(writer: *std.io.Writer, data: []const u8) !void {
+    fn writeBytes(writer: *std.Io.Writer, data: []const u8) !void {
         try writer.writeAll(
             \\{"/":{"bytes":"
         );

@@ -556,7 +556,7 @@ pub const Value = union(Kind) {
     }
 
     /// Format a Value
-    pub fn format(self: Value, writer: *std.io.Writer) !void {
+    pub fn format(self: Value, writer: *std.Io.Writer) !void {
         switch (self) {
             .null => try writer.print("Value(Null)", .{}),
             .boolean => |value| try writer.print("Value(Boolean: {any})", .{value}),
