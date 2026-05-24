@@ -1,7 +1,7 @@
 .{
     .name = .ipld,
     .fingerprint = 0xb00c8e2f530f8851,
-    .version = "0.2.1",
+    .version = "0.3.0",
     .minimum_zig_version = "0.16.0",
     .paths = .{
         "build.zig",
