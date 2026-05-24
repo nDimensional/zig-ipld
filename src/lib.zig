@@ -5,4 +5,4 @@ pub const Kind = value.Kind;
 pub const Value = value.Value;
 
 pub const Bytes = @import("types/Bytes.zig");
-pub const String = @import("types/Bytes.zig");
+pub const String = @import("types/String.zig");

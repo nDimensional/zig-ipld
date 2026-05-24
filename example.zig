@@ -7,7 +7,7 @@ const cbor = @import("dag-cbor");
 const json = @import("dag-json");
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     const allocator = gpa.allocator();
     defer std.debug.assert(gpa.deinit() == .ok);
 
@@ -15,7 +15,7 @@ pub fn main() !void {
         try Value.createList(allocator, .{}),
         try Value.createList(allocator, .{
             Value.Null,
-            Value.integer(42),
+            Value.createInteger(42),
             Value.True,
         }),
     });

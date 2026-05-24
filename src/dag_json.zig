@@ -50,7 +50,7 @@ const FieldList = struct {
         };
 
         switch (@typeInfo(Item)) {
-            .Struct => |info| {
+            .@"struct" => |info| {
                 const indices = comptime sortIndices(info.fields);
                 try std.testing.expectEqualSlices(usize, &.{ 0, 2, 1, 4, 3 }, &indices);
             },
@@ -121,7 +121,7 @@ pub const Decoder = struct {
         return .{
             .options = options,
             .allocator = allocator,
-            .buffer = std.ArrayList(u8){},
+            .buffer = std.ArrayList(u8).empty,
         };
     }
 
@@ -280,12 +280,12 @@ pub const Decoder = struct {
                 inline for (info.decls) |decl| {
                     if (comptime std.mem.eql(u8, decl.name, "decodeIpldInteger")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.decodeIpldInteger))) {
-                            .Fn => |func_info| func_info,
+                            .@"fn" => |func_info| func_info,
                             else => @compileError("T.decodeIpldInteger must be a function"),
                         };
 
-                        switch (@typeInfo(func_info.return_type orelse .NoReturn)) {
-                            .ErrorUnion => |error_union_info| if (error_union_info.payload != T)
+                        switch (@typeInfo(func_info.return_type orelse noreturn)) {
+                            .error_union => |error_union_info| if (error_union_info.payload != T)
                                 @compileError("T.decodeIpldInteger must be a function returning an error union of T"),
                             else => @compileError("T.decodeIpldInteger must be a function returning an error union of T"),
                         }
@@ -307,9 +307,9 @@ pub const Decoder = struct {
                             else => @compileError("T.parseIpldString must be a function"),
                         };
 
-                        const error_payload = switch (@typeInfo(func_info.return_type orelse .NoReturn)) {
-                            .ErrorUnion => |error_union_info| error_union_info.payload,
-                            else => .NoReturn,
+                        const error_payload = switch (@typeInfo(func_info.return_type orelse noreturn)) {
+                            .error_union => |error_union_info| error_union_info.payload,
+                            else => noreturn,
                         };
 
                         if (error_payload != T)
@@ -319,19 +319,19 @@ pub const Decoder = struct {
                         return try T.parseIpldString(allocator, str);
                     } else if (comptime std.mem.eql(u8, decl.name, "parseIpldBytes")) {
                         const func_info = switch (@typeInfo(@TypeOf(T.parseIpldBytes))) {
-                            .Fn => |func_info| func_info,
+                            .@"fn" => |func_info| func_info,
                             else => @compileError("T.parseIpldBytes must be a function"),
                         };
 
-                        const error_payload = switch (@typeInfo(func_info.return_type orelse .NoReturn)) {
-                            .ErrorUnion => |error_union_info| error_union_info.payload,
-                            else => .NoReturn,
+                        const error_payload = switch (@typeInfo(func_info.return_type orelse noreturn)) {
+                            .error_union => |error_union_info| error_union_info.payload,
+                            else => noreturn,
                         };
 
                         if (error_payload != T)
                             @compileError("T.parseIpldBytes must be a function returning an error union of T");
 
-                        const bytes = try decodeBytes(self.allocator, reader);
+                        const bytes = try self.decodeBytes(self.allocator, reader);
                         defer self.allocator.free(bytes);
                         return try T.parseIpldBytes(allocator, bytes);
                     }
@@ -690,17 +690,17 @@ pub const Encoder = struct {
                 inline for (info.decls) |decl| {
                     if (comptime std.mem.eql(u8, decl.name, "encodeIpldInteger")) {
                         const return_type = switch (@typeInfo(@TypeOf(T.encodeIpldInteger))) {
-                            .Fn => |func_info| func_info.return_type orelse .NoReturn,
+                            .@"fn" => |func_info| func_info.return_type orelse noreturn,
                             else => @compileError("T.encodeIpldInteger must be a function"),
                         };
 
                         const return_payload = switch (@typeInfo(return_type)) {
-                            .ErrorUnion => |error_union_info| error_union_info.payload,
+                            .error_union => |error_union_info| error_union_info.payload,
                             else => @compileError("T.encodeIpldInteger must return an error union of an integer type"),
                         };
 
                         switch (@typeInfo(return_payload)) {
-                            .Int => {},
+                            .int => {},
                             else => @compileError("T.encodeIpldInteger must return an error union of an integer type"),
                         }
 
@@ -714,8 +714,8 @@ pub const Encoder = struct {
 
                         // TODO: validate func_info.params
 
-                        const return_payload = switch (@typeInfo(func_info.return_type orelse .NoReturn)) {
-                            .ErrorUnion => |error_union_info| error_union_info.payload,
+                        const return_payload = switch (@typeInfo(func_info.return_type orelse noreturn)) {
+                            .error_union => |error_union_info| error_union_info.payload,
                             else => @compileError("T.writeIpldString must return a void error union"),
                         };
 
@@ -735,13 +735,13 @@ pub const Encoder = struct {
                             else => @compileError("T.writeIpldBytes must be a function"),
                         };
 
-                        const return_payload = switch (@typeInfo(func_info.return_type orelse .NoReturn)) {
-                            .ErrorUnion => |error_union_info| error_union_info.payload,
+                        const return_payload = switch (@typeInfo(func_info.return_type orelse noreturn)) {
+                            .error_union => |error_union_info| error_union_info.payload,
                             else => @compileError("T.writeIpldBytes must return a void error union"),
                         };
 
                         switch (@typeInfo(return_payload)) {
-                            .Void => {},
+                            .void => {},
                             else => @compileError("T.writeIpldBytes must return a void error union"),
                         }
 

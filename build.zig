@@ -13,7 +13,7 @@ pub fn build(b: *std.Build) void {
 
     const multiformat_modules = multiformats.builder.modules;
     for (multiformat_modules.keys(), multiformat_modules.values()) |name, module| {
-        b.modules.put(b.dupe(name), module) catch @panic("OOM");
+        b.modules.put(b.allocator, b.dupe(name), module) catch @panic("OOM");
     }
 
     const ipld = b.addModule("ipld", .{

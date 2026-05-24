@@ -10,11 +10,11 @@ const cbor = @import("dag-cbor");
 const Fixture = struct {
     allocator: std.mem.Allocator,
     cid: CID,
-    file: std.fs.File,
+    file: std.Io.File,
 
-    pub fn init(allocator: std.mem.Allocator, dir: std.fs.Dir, codec: multicodec.Codec) !Fixture {
+    pub fn init(allocator: std.mem.Allocator, io: std.Io, dir: std.Io.Dir, codec: multicodec.Codec) !Fixture {
         var iter = dir.iterate();
-        while (try iter.next()) |entry| {
+        while (try iter.next(io)) |entry| {
             if (entry.kind != .file) continue;
             const ext_idx = std.mem.lastIndexOfScalar(u8, entry.name, '.') orelse continue;
             if (!std.mem.eql(u8, entry.name[ext_idx + 1 ..], @tagName(codec))) continue;
@@ -22,23 +22,25 @@ const Fixture = struct {
             const cid = try CID.parse(allocator, entry.name[0..ext_idx]);
             errdefer cid.deinit(allocator);
 
-            const file = try dir.openFile(entry.name, .{});
+            const file = try dir.openFile(io, entry.name, .{});
             return .{ .allocator = allocator, .cid = cid, .file = file };
         }
 
         return error.NotFound;
     }
 
-    pub fn deinit(self: Fixture) void {
+    pub fn deinit(self: Fixture, io: std.Io) void {
         self.cid.deinit(self.allocator);
-        self.file.close();
+        self.file.close(io);
     }
 };
 
 test "ipld/codec-fixtures" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     const allocator = gpa.allocator();
     defer std.debug.assert(gpa.deinit() == .ok);
+
+    const io = std.testing.io;
 
     const float_format = json.Encoder.FloatFormat.decimalInRange(-2, 5);
     var json_encoder = json.Encoder.init(allocator, .{ .float_format = float_format });
@@ -50,9 +52,9 @@ test "ipld/codec-fixtures" {
     var cbor_decoder = cbor.Decoder.init(allocator, .{});
     defer cbor_decoder.deinit();
 
-    var cwd = std.fs.cwd();
-    var fixtures = try cwd.openDir("codec-fixtures/fixtures", .{});
-    defer fixtures.close();
+    var cwd = std.Io.Dir.cwd();
+    var fixtures = try cwd.openDir(io, "codec-fixtures/fixtures", .{});
+    defer fixtures.close(io);
 
     const ParseError = error{Overflow};
     const known_failures: []const struct { name: []const u8, err: ParseError } = &.{
@@ -62,30 +64,30 @@ test "ipld/codec-fixtures" {
     };
 
     var iter = fixtures.iterate();
-    iter: while (try iter.next()) |entry| {
+    iter: while (try iter.next(io)) |entry| {
         if (entry.kind != .directory) continue;
 
-        var fixture_dir = try fixtures.openDir(entry.name, .{});
-        defer fixture_dir.close();
+        var fixture_dir = try fixtures.openDir(io, entry.name, .{});
+        defer fixture_dir.close(io);
 
-        const cbor_fixture = try Fixture.init(allocator, fixture_dir, .@"dag-cbor");
-        defer cbor_fixture.deinit();
+        const cbor_fixture = try Fixture.init(allocator, io, fixture_dir, .@"dag-cbor");
+        defer cbor_fixture.deinit(io);
 
-        const json_fixture = try Fixture.init(allocator, fixture_dir, .@"dag-json");
-        defer json_fixture.deinit();
+        const json_fixture = try Fixture.init(allocator, io, fixture_dir, .@"dag-json");
+        defer json_fixture.deinit(io);
 
         var cbor_file_buffer: [4096]u8 = undefined;
         var json_file_buffer: [4096]u8 = undefined;
 
         for (known_failures) |failure| {
             if (std.mem.eql(u8, failure.name, entry.name)) {
-                var cbor_file_reader = cbor_fixture.file.reader(&cbor_file_buffer);
+                var cbor_file_reader = cbor_fixture.file.reader(io, &cbor_file_buffer);
                 try std.testing.expectError(
                     failure.err,
                     cbor_decoder.readValue(allocator, &cbor_file_reader.interface),
                 );
 
-                var json_file_reader = json_fixture.file.reader(&json_file_buffer);
+                var json_file_reader = json_fixture.file.reader(io, &json_file_buffer);
                 try std.testing.expectError(
                     failure.err,
                     json_decoder.readValue(allocator, &json_file_reader.interface),
@@ -95,10 +97,12 @@ test "ipld/codec-fixtures" {
             }
         }
 
-        const cbor_fixture_bytes = try cbor_fixture.file.readToEndAlloc(allocator, std.math.maxInt(usize));
+        var cbor_file_reader = cbor_fixture.file.reader(io, &cbor_file_buffer);
+        const cbor_fixture_bytes = try cbor_file_reader.interface.allocRemaining(allocator, .unlimited);
         defer allocator.free(cbor_fixture_bytes);
 
-        const json_fixture_bytes = try json_fixture.file.readToEndAlloc(allocator, std.math.maxInt(usize));
+        var json_file_reader = json_fixture.file.reader(io, &json_file_buffer);
+        const json_fixture_bytes = try json_file_reader.interface.allocRemaining(allocator, .unlimited);
         defer allocator.free(json_fixture_bytes);
 
         // std.log.warn("now decoding {s}/{s}.dag-cbor", .{ entry.name, cbor_fixture.cid });
@@ -134,7 +138,7 @@ test "make sure failed parses free partial data" {
         ,
     };
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     const allocator = gpa.allocator();
     defer std.debug.assert(gpa.deinit() == .ok);
 

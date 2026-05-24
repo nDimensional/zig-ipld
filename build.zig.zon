@@ -2,7 +2,7 @@
     .name = .ipld,
     .fingerprint = 0xb00c8e2f530f8851,
     .version = "0.2.1",
-    .minimum_zig_version = "0.15.1",
+    .minimum_zig_version = "0.16.0",
     .paths = .{
         "build.zig",
         "build.zig.zon",
@@ -10,8 +10,8 @@
     },
     .dependencies = .{
         .multiformats = .{
-            .url = "https://github.com/nDimensional/zig-multiformats/archive/refs/tags/v0.3.1.tar.gz",
-            .hash = "multiformats-0.3.1-lh9N76kHAQBA00sKf1S0CVUZKKBBbOdE6FIz604zYWjD",
+            .url = "https://github.com/nDimensional/zig-multiformats/archive/refs/tags/v0.4.0.tar.gz",
+            .hash = "multiformats-0.4.0-lh9N75UHAQBDdjyN2nfQl0Cyscf0ho2_SflGsJbTzcAM",
         },
     },
 }

@@ -186,7 +186,7 @@ pub const Value = union(Kind) {
         array_list: std.ArrayListUnmanaged(Value),
 
         pub fn create(allocator: std.mem.Allocator, initial_values: anytype) !*List {
-            var array_list = std.ArrayListUnmanaged(Value){};
+            var array_list: std.ArrayListUnmanaged(Value) = .empty;
             errdefer array_list.deinit(allocator);
 
             const tuple_info = switch (@typeInfo(@TypeOf(initial_values))) {
@@ -616,7 +616,7 @@ test "primitive values" {
 }
 
 test "complex values" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer std.debug.assert(gpa.deinit() == .ok);
     const allocator = gpa.allocator();
 
